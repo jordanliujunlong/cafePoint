@@ -1,0 +1,77 @@
+// 本町咖啡积分系统 - 数据库结构
+// 设计说明：
+//  - Member      顾客会员（以 LINE 帐号登入）
+//  - StaffUser   店员 / 管理员帐号（帐号密码登入）
+//  - Rule        积分规则（单例表，只会有一行 id = "singleton"）
+//  - CheckinCode 店员端目前有效的到店签到码（单例表）
+//  - Transaction 所有积分变动纪录（签到 / 消费 / 新会员礼）
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Member {
+  id              String        @id @default(cuid())
+  lineUserId      String        @unique
+  displayName     String
+  pictureUrl      String?
+  phone           String?
+  points          Int           @default(0)
+  totalSpent      Float         @default(0)
+  lastCheckinDate String? // 门店当地时区的 YYYY-MM-DD，用来判断「今日是否已签到」
+  joinedAt        DateTime      @default(now())
+  transactions    Transaction[]
+
+  @@index([displayName])
+}
+
+model StaffUser {
+  id           String        @id @default(cuid())
+  username     String        @unique
+  passwordHash String
+  name         String
+  role         String // "staff" | "admin"
+  createdAt    DateTime      @default(now())
+  transactions Transaction[]
+}
+
+model Rule {
+  id               String   @id @default("singleton")
+  earnRate         Int      @default(10) // 每消费 N 元 得 1 积分
+  checkinPoints    Int      @default(5) // 每次到店签到获得的积分
+  redeemRate       Int      @default(10) // 每 N 积分 折抵 1 元
+  maxRedeemPercent Int      @default(50) // 单笔最高折抵订单金额的百分比
+  codeTTL          Int      @default(60) // 店员签到码有效秒数
+  updatedAt        DateTime @updatedAt
+}
+
+model CheckinCode {
+  id          String   @id @default("singleton")
+  code        String
+  generatedAt DateTime @default(now())
+}
+
+model Transaction {
+  id             String   @id @default(cuid())
+  memberId       String
+  member         Member   @relation(fields: [memberId], references: [id])
+  type           String // "checkin" | "purchase" | "bonus"
+  ts             DateTime @default(now())
+  orderAmount    Float?
+  discount       Float?
+  redeemedPoints Int?
+  paidAmount     Float?
+  earnedPoints   Int      @default(0)
+  note           String?
+  staffUserId    String?
+  staffUser      StaffUser? @relation(fields: [staffUserId], references: [id])
+
+  @@index([memberId])
+  @@index([ts])
+  @@index([type])
+}
