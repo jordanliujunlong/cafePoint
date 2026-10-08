@@ -429,3 +429,5 @@
 .icon-btn{width:32px;height:32px;border-radius:9px;border:1px solid var(--border);background:var(--surface);color:var(--ink-2);display:flex;align-items:center;justify-content:center;flex:none;}
 .icon-btn svg{width:15px;height:15px;}
 .icon-btn:hover{background:var(--surface-2);}
+
+.brandmark .mark-img{width:36px;height:36px;border-radius:10px;box-shadow:var(--shadow);flex:none;}

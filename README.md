@@ -160,17 +160,41 @@ git commit -m "本町咖啡积分系统"
 
 ### 5. 第一次部署后：建立数据表 + 管理员帐号
 
-Railway 服务部署起来之后，数据库还是空的，需要手动跑一次建表指令。在 Railway 项目页面找到
-**Settings → 你的服务** 里的 **Shell**（或用本机安装 [Railway CLI](https://docs.railway.app/guides/cli)
-执行 `railway login` → `railway link` 连结到你的项目后，在本机跑）：
+Railway 服务部署起来之后，数据库还是空的，需要从你自己的电脑跑一次建表指令。
 
-```bash
-railway run npm run prisma:push
-railway run npm run seed
-```
+> ⚠️ **不要直接用 Railway 变量里的 `DATABASE_URL`**：它的主机名是 `postgres.railway.internal`，
+> 这是 Railway 内部私有网络的地址，只有跑在 Railway 里的服务连得到；在你自己的电脑执行会出现
+> `P1001: Can't reach database server at postgres.railway.internal:5432`。
+> `railway run ...` 也一样（它只是把 Railway 的变量带到本机执行，主机名还是内部的）。
+> 本机要连的是 **公开网址**：
 
-看到「已建立管理员帐号：xxx / xxx」就代表成功了。之后用这组帐号密码登入「商家后台」，
-记得尽快到 **员工帐号** 分页新增自己要用的帐号、或至少改掉预设密码（见下方安全性备注）。
+1. Railway 项目里点 **Postgres 服务 → Variables**（或 **Connect** 分页），复制 **`DATABASE_PUBLIC_URL`**
+   （样子像 `postgresql://postgres:密码@xxxx.proxy.rlwy.net:12345/railway`）。
+2. 在本机项目资料夹，**只在这个终端窗口里**暂时覆盖 `DATABASE_URL`，然后跑两个指令：
+
+   Windows PowerShell：
+
+   ```powershell
+   $env:DATABASE_URL = "贴上 DATABASE_PUBLIC_URL 的值"
+   npm run prisma:push
+   npm run seed
+   ```
+
+   macOS / Linux：
+
+   ```bash
+   export DATABASE_URL="贴上 DATABASE_PUBLIC_URL 的值"
+   npm run prisma:push
+   npm run seed
+   ```
+
+   （终端里已设定的环境变量会优先于 `.env` 档，所以不用改 `.env`；关掉终端就恢复。
+   如果你习惯直接改 `.env`，做完记得改回去，并且不要把含密码的 `.env` 提交到 Git。）
+3. 看到「Your database is now in sync with your Prisma schema」以及「已建立管理员帐号：xxx / xxx」
+   就代表成功了。Railway 上跑的服务不需要改，它的 `DATABASE_URL` 继续用 `${{Postgres.DATABASE_URL}}`
+   （内部网址，更快也不收对外流量费）。
+
+之后用这组帐号密码登入「商家后台」，记得尽快到 **员工帐号** 分页新增自己要用的帐号、或至少改掉预设密码。
 
 ### 6. 回到 LINE Developers 补上正式的 Callback URL
 
@@ -195,12 +219,12 @@ Railway 服务的 **Settings → Networking** 可以加自订网域（例如 `po
   改了立刻生效，不用重新部署。
 - **新增 / 删除店员或管理员帐号**：登入「商家后台 → 员工帐号」。删除帐号无法复原。
 - **修改后台密码**：目前没有做密码修改的画面（只有创建帐号时设定），如果要改某个帐号的密码，
-  最简单的方式是用 `railway run` 连进 Railway 执行一段小脚本，或直接删除旧帐号、新增一个同名新帐号。
+  最简单的方式是直接删除旧帐号、新增一个同名新帐号（「商家后台 → 员工帐号」）。
   之后如果需要，可以再请我加一个「修改密码」的介面。
 - **查看营运数据**：「商家后台 → 总览」有近 7 日积分发放/核销趋势图与关键指标；
   「积分记录」可以查全部历史纪录并依类型筛选。
 - **修改 schema.prisma 后同步数据库**：改完欄位，本机执行 `npx prisma db push`（会直接套用到
-  `.env` 指到的数据库），或部署后用 `railway run npm run prisma:push` 套用到正式环境。
+  `.env` 指到的数据库），或照第三节第 5 步，用 `DATABASE_PUBLIC_URL` 从本机套用到正式环境。
 
 ---
 
@@ -238,7 +262,10 @@ Railway 服务的 **Settings → Networking** 可以加自订网域（例如 `po
 A: 还没在 `.env`（本地）或 Railway 环境变量填 LINE_CHANNEL_ID / LINE_CHANNEL_SECRET，见第二节。
 
 **Q: 部署后打开网站，API 都回「500」或「找不到资料表」？**
-A: 忘记跑 `railway run npm run prisma:push` 建表，见第三节第 5 步。
+A: 忘记建表，见第三节第 5 步（用 `DATABASE_PUBLIC_URL` 从本机跑 `npm run prisma:push`）。
+
+**Q: 本机执行 `prisma db push` 出现 `P1001: Can't reach database server at postgres.railway.internal`？**
+A: 那是 Railway 内部网址，本机连不到。改用 Postgres 服务里的 `DATABASE_PUBLIC_URL`，见第三节第 5 步。
 
 **Q: LINE 登入跳回来变成「登入验证失败」？**
 A: 通常是 Callback URL 没对上 —— 检查 LINE Developers 后台填的网址，跟 `APP_BASE_URL` 拼出来的
