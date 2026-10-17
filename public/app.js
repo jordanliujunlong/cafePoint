@@ -9,7 +9,7 @@
   }
   function fmt(n) {
     n = Math.round(Number(n) || 0);
-    return n.toLocaleString('zh-CN');
+    return n.toLocaleString('ja-JP');
   }
   function fmtSigned(n) {
     n = Math.round(Number(n) || 0);
@@ -59,6 +59,8 @@
       star: '<path d="M12 3l2.6 5.7 6.2.6-4.7 4.2 1.4 6.1L12 16.6 6.5 19.6l1.4-6.1L3.2 9.3l6.2-.6z"/>',
       home: '<path d="M4 11l8-7 8 7"/><path d="M6 10v9h12v-9"/>',
       ticket: '<path d="M3 8a2 2 0 012-2h14a2 2 0 012 2v2a2 2 0 000 4v2a2 2 0 01-2 2H5a2 2 0 01-2-2v-2a2 2 0 000-4z"/><path d="M12 6v2M12 11v2M12 16v2"/>',
+      zap: '<path d="M13 2L4 14h6l-1 8 9-12h-6z"/>',
+      qr: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h3M21 17v4h-4M17 17v.01"/>',
       gift: '<rect x="3" y="9" width="18" height="12" rx="1.5"/><path d="M3 13h18M12 9v12"/><path d="M12 9c-1.5 0-4-1-4-3.2A2.3 2.3 0 0112 5c0-1.3-1-2-2.3-2M12 9c1.5 0 4-1 4-3.2A2.3 2.3 0 0012 5c0-1.3 1-2 2.3-2"/>',
       arrowUpRight: '<path d="M7 17L17 7M9 7h8v8"/>',
       logout: '<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>',
@@ -93,7 +95,7 @@
       try { data = JSON.parse(text); } catch (e) { /* 非 JSON 回应 */ }
     }
     if (!res.ok) {
-      var err = new Error((data && data.error) || ('请求失败（' + res.status + '）'));
+      var err = new Error((data && data.error) || ('リクエストに失敗しました（' + res.status + '）'));
       err.status = res.status;
       throw err;
     }
@@ -119,15 +121,17 @@
     booted: false,
     role: 'customer',
 
-    customer: { screen: 'login', summary: null, transactions: null, loading: false, checkinError: '', lastCheckinPoints: 0, loginError: '' },
+    customer: { screen: 'login', summary: null, transactions: null, loading: false, busy: false, lastCheckin: null, qr: null, qrError: '', loginError: '', inviteInput: '', inviteStatus: null, invites: null },
 
     staffAuth: { form: { username: '', password: '' }, error: '', busy: false },
     staff: {
-      tab: 'code',
-      code: null,
+      tab: 'checkout',
       members: [],
       memberSearch: '',
       selectedMember: null,
+      scan: { active: false, error: '', busy: false, input: '' },
+      lastInvite: null,
+      searchOpen: false,
       checkoutForm: { orderAmount: '', redeemOn: false, redeemPoints: 0 },
       todayLog: null,
       busy: false
@@ -149,9 +153,9 @@
 
   /* ================= 顶部导览 ================= */
   var ROLES = [
-    { id: 'customer', label: '顾客端', icon: 'coffee', ctx: 'LINE 会员卡（手机视角）' },
-    { id: 'staff', label: '店员收银台', icon: 'wallet', ctx: '门店收银 / 平板 Kiosk 视角' },
-    { id: 'admin', label: '商家后台', icon: 'sliders', ctx: '管理员后台，设定积分规则与查看数据' }
+    { id: 'customer', label: 'お客様用', icon: 'coffee', ctx: 'LINE会員カード（スマホ表示）' },
+    { id: 'staff', label: 'レジ（スタッフ）', icon: 'wallet', ctx: '店舗レジ / タブレット表示' },
+    { id: 'admin', label: '管理画面', icon: 'sliders', ctx: '管理者向け：ポイントルールの設定とデータ確認' }
   ];
   function renderChrome() {
     var rs = document.getElementById('roleswitch');
@@ -176,14 +180,29 @@
   }
 
   function loadingBlock(label) {
-    return '<div class="loading-wrap"><div class="spinner"></div><div>' + esc(label || '载入中…') + '</div></div>';
+    return '<div class="loading-wrap"><div class="spinner"></div><div>' + esc(label || '読み込み中…') + '</div></div>';
   }
 
   /* ================= 启动：抓目前登入状态 ================= */
   async function boot() {
     var params = new URLSearchParams(location.search);
+    var inviteNotice = '';
     if (params.get('login_error')) {
       state.customer.loginError = params.get('login_error');
+    }
+    if (params.get('invite')) {
+      state.customer.inviteInput = params.get('invite').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^(.{4})(.+)$/, '$1-$2');
+    }
+    if (params.get('invite_result')) {
+      var ir = params.get('invite_result');
+      var bonus = parseInt(params.get('invite_bonus'), 10) || 0;
+      inviteNotice = ir === 'ok' ? { msg: '登録完了！紹介ボーナス +' + bonus + ' ポイントを付与しました', kind: 'ok' }
+        : ir === 'existing' ? { msg: 'すでに会員のため、招待コードは新規会員のみ利用できます。このコードは消費されていません', kind: 'err' }
+        : ir === 'used' ? { msg: 'この招待コードはすでに使用されているため、紹介ボーナスはありません', kind: 'err' }
+        : ir === 'self' ? { msg: 'ご自身の招待コードは使用できません', kind: 'err' }
+        : { msg: '招待コードが無効のため、紹介ボーナスはありません', kind: 'err' };
+    }
+    if (params.get('login_error') || params.get('invite') || params.get('invite_result')) {
       history.replaceState({}, '', location.pathname);
     }
     try {
@@ -197,15 +216,17 @@
     state.booted = true;
     render();
     onRoleEnter();
+    if (inviteNotice) toast(inviteNotice.msg, inviteNotice.kind);
   }
 
   /* ================= master render ================= */
   function render() {
     renderChrome();
     if (!state.booted) {
-      document.getElementById('app').innerHTML = loadingBlock('正在连线到服务器…');
+      document.getElementById('app').innerHTML = loadingBlock('サーバーに接続中…');
       return;
     }
+    if (!(state.role === 'staff' && state.staff.tab === 'checkout' && state.session.staff)) stopScan();
     if (state.role === 'customer') renderCustomer();
     else if (state.role === 'staff') renderStaff();
     else renderAdmin();
@@ -230,10 +251,97 @@
     render();
   }
 
+  function copyText(text, okMsg) {
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      ta.remove();
+      toast(ok ? okMsg : 'コピーに失敗しました。文字を長押ししてコピーしてください', ok ? 'ok' : 'err');
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { toast(okMsg); }, fallback);
+    } else fallback();
+  }
+
+  /* ---------- 第三方库（只在需要时才载入）---------- */
+  var scriptPromises = {};
+  function loadScriptOnce(src) {
+    if (!scriptPromises[src]) {
+      scriptPromises[src] = new Promise(function (resolve, reject) {
+        var el = document.createElement('script');
+        el.src = src;
+        el.onload = resolve;
+        el.onerror = function () { delete scriptPromises[src]; reject(new Error('読み込みに失敗しました：' + src)); };
+        document.head.appendChild(el);
+      });
+    }
+    return scriptPromises[src];
+  }
+
+  /* ---------- 顾客：会员二维码 ---------- */
+  var qrTimerHandle = null;
+  function stopQrTimer() {
+    if (qrTimerHandle) { clearInterval(qrTimerHandle); qrTimerHandle = null; }
+  }
+  function qrSvgHtml(text) {
+    var q = window.qrcode(0, 'M');
+    q.addData(text);
+    q.make();
+    return q.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+  }
+  function updateQrDom() {
+    var c = state.customer;
+    var box = document.getElementById('qrbox');
+    if (!box) return;
+    var cap = document.getElementById('qrcap');
+    if (c.qrError) {
+      box.innerHTML = '<div class="qr-fail">' + esc(c.qrError) + '</div>';
+      if (cap) cap.textContent = '';
+      return;
+    }
+    if (!c.qr) { box.innerHTML = '<div class="qr-fail">生成中…</div>'; return; }
+    if (box.getAttribute('data-code') !== c.qr.code) {
+      try { box.innerHTML = qrSvgHtml(c.qr.code); box.setAttribute('data-code', c.qr.code); }
+      catch (e) { box.innerHTML = '<div class="qr-fail">QRコードの生成に失敗しました</div>'; }
+    }
+    var left = Math.max(0, Math.ceil(c.qr.refreshIn - (Date.now() - c.qr.at) / 1000));
+    if (cap) cap.textContent = left + ' 秒後に自動更新';
+    var bar = document.getElementById('qrbar');
+    if (bar) bar.style.width = (100 * left / c.qr.refreshIn) + '%';
+  }
+  async function loadQr() {
+    var c = state.customer;
+    try {
+      await loadScriptOnce('/vendor/qrcode.js');
+      var data = await api('GET', '/api/me/qr');
+      c.qr = { code: data.code, refreshIn: data.refreshIn || 60, at: Date.now(), displayName: data.displayName, points: data.points };
+      c.qrError = '';
+    } catch (e) {
+      c.qrError = e.message || '会員コードを取得できません';
+    }
+    updateQrDom();
+  }
+  function startQrTimer() {
+    stopQrTimer();
+    loadQr();
+    qrTimerHandle = setInterval(function () {
+      var c = state.customer;
+      if (state.role !== 'customer' || c.screen !== 'qr') { stopQrTimer(); return; }
+      if (!c.qr || (Date.now() - c.qr.at) / 1000 >= c.qr.refreshIn) loadQr(); else updateQrDom();
+    }, 1000);
+  }
+  document.addEventListener('visibilitychange', function () {
+    var c = state.customer;
+    if (!document.hidden && state.role === 'customer' && c.screen === 'qr') loadQr();
+  });
+
   function custHeader(title, opts) {
     opts = opts || {};
     var left = opts.back ? '<button data-act="back">' + svg('chevronLeft') + '</button>' : '<span class="side"></span>';
-    var right = opts.logout ? '<button class="txt-btn" data-act="logout">登出</button>' : '<span class="side"></span>';
+    var right = opts.logout ? '<button class="txt-btn" data-act="logout">ログアウト</button>' : '<span class="side"></span>';
     return '<div class="linebar"><div class="side">' + left + '</div><h2>' + esc(title) + '</h2><div class="side" style="width:auto; justify-content:flex-end;">' + right + '</div></div>';
   }
 
@@ -241,20 +349,24 @@
     var c = state.customer;
     var scr = state.session.member ? c.screen : 'login';
     var body = '', header = '', showNav = false;
+    if (scr !== 'qr') stopQrTimer();
 
     if (scr === 'login') {
-      header = custHeader('本町咖啡 会员卡');
+      header = custHeader('本町珈琲 会員カード');
       body =
         '<div class="login-hero">' +
         '<div class="badge">' + svg('coffee') + '</div>' +
-        '<h3>开启你的积分之旅</h3>' +
-        '<p>登入后即可到店签到、消费累积积分，积分还能直接折抵消费金额，杯杯都划算。</p>' +
+        '<h3>ポイントを貯めはじめましょう</h3>' +
+        '<p>ログイン後は毎日のチェックインやご利用でポイントが貯まり、貯めたポイントはそのままお会計に使えます。</p>' +
         '</div>' +
         (c.loginError ? '<div class="banner crit">' + svg('alert') + '<span>' + esc(c.loginError) + '</span></div>' : '') +
-        '<button class="btn line block" data-act="linelogin" style="border:1px solid var(--border);">' + svg('coffee') + ' 使用 LINE 帐号继续</button>' +
-        '<p class="login-legal">继续即代表你同意《会员服务条款》与《隐私权政策》</p>';
+        '<div class="invite-box"><label for="invitecode">招待コードをお持ちですか？（任意・新規会員のみ）</label>' +
+        '<input class="input" id="invitecode" autocomplete="off" autocapitalize="characters" maxlength="9" placeholder="例：K7M4-Q9XT" value="' + esc(c.inviteInput) + '">' +
+        '<div class="invite-status ' + (c.inviteStatus ? c.inviteStatus.kind : '') + '" id="invitestatus">' + esc(c.inviteStatus ? c.inviteStatus.text : '') + '</div></div>' +
+        '<button class="btn line block" data-act="linelogin" style="border:1px solid var(--border);">' + svg('coffee') + ' LINEアカウントで続ける</button>' +
+        '<p class="login-legal">続けることで「会員規約」と「プライバシーポリシー」に同意したものとみなされます</p>';
     } else if (scr === 'home') {
-      header = custHeader('我的会员卡', { logout: true });
+      header = custHeader('マイ会員カード', { logout: true });
       showNav = true;
       if (c.loading || !c.summary) {
         body = loadingBlock();
@@ -263,62 +375,124 @@
         var recent = (c.transactions || []).slice(0, 3);
         body =
           '<div class="points-hero">' +
-          '<div class="lbl">' + svg('star') + ' 可用积分</div>' +
-          '<div class="val num">' + fmt(s.points) + '<span>点</span></div>' +
-          '<div class="sub">约可折抵消费 ' + fmt(s.pointsValue) + ' 元</div>' +
+          '<button class="qr-btn" data-act="goqr">' + svg('qr') + '<span>会員コード</span></button>' +
+          '<div class="lbl">' + svg('star') + ' 利用可能ポイント</div>' +
+          '<div class="val num">' + fmt(s.points) + '<span>ポイント</span></div>' +
+          '<div class="sub">約 ' + fmt(s.pointsValue) + ' 円分のお会計に利用できます</div>' +
           '</div>' +
-          '<button class="cta-checkin ' + (s.checkedInToday ? 'off' : 'on') + '" data-act="gocheckin">' +
-          '<div class="ic">' + svg('ticket') + '</div>' +
-          '<div class="tx"><b>' + (s.checkedInToday ? '今日已签到' : '到店签到 领积分') + '</b><span>' + (s.checkedInToday ? '明天再来赚积分吧' : '向店员出示签到码，立得 ' + s.rules.checkinPoints + ' 积分') + '</span></div>' +
-          (s.checkedInToday ? svg('check', 'chev') : svg('chevronRight', 'chev')) +
-          '</button>' +
+          streakCardHtml(s, c) +
+          '<button class="invite-card" data-act="goinvites">' +
+          '<div class="ic">' + svg('gift') + '</div>' +
+          '<div class="tx"><b>お友達紹介</b><span>' + (s.unusedInvites ? 'お渡しできる招待コードが ' + s.unusedInvites + ' 件あります' : 'ご利用後にスタッフが招待コードをお渡しします') + ' · 紹介成功で +' + s.rules.inviterBonus + ' ポイント</span></div>' +
+          svg('chevronRight', 'chev') + '</button>' +
           '<div class="stat2">' +
-          '<div class="tile"><div class="t">累计消费</div><div class="v num">' + fmt(s.totalSpent) + ' 元</div></div>' +
-          '<div class="tile"><div class="t">本月已获积分</div><div class="v num">' + fmt(s.monthEarned) + ' 点</div></div>' +
+          '<div class="tile"><div class="t">累計ご利用額</div><div class="v num">' + fmt(s.totalSpent) + ' 円</div></div>' +
+          '<div class="tile"><div class="t">今月の獲得ポイント</div><div class="v num">' + fmt(s.monthEarned) + ' ポイント</div></div>' +
           '</div>' +
           '<div>' +
-          '<div class="sec-head"><h4>最近动态</h4><a data-act="gohistory">查看全部 ' + svg('chevronRight') + '</a></div>' +
-          (recent.length ? '<div>' + recent.map(txRowHtml).join('') + '</div>' : '<div class="empty">' + svg('list') + '<div>还没有消费或签到纪录</div></div>') +
+          '<div class="sec-head"><h4>最近の履歴</h4><a data-act="gohistory">すべて見る ' + svg('chevronRight') + '</a></div>' +
+          (recent.length ? '<div>' + recent.map(txRowHtml).join('') + '</div>' : '<div class="empty">' + svg('list') + '<div>ご利用・チェックインの履歴はまだありません</div></div>') +
           '</div>';
       }
     } else if (scr === 'history') {
-      header = custHeader('消费记录', { back: true });
+      header = custHeader('利用履歴', { back: true });
       showNav = true;
       var all = c.transactions || [];
-      body = c.loading ? loadingBlock() : (all.length ? '<div>' + all.map(txRowHtml).join('') + '</div>' : '<div class="empty">' + svg('list') + '<div>还没有任何纪录</div></div>');
-    } else if (scr === 'checkin') {
-      header = custHeader('到店签到', { back: true });
+      body = c.loading ? loadingBlock() : (all.length ? '<div>' + all.map(txRowHtml).join('') + '</div>' : '<div class="empty">' + svg('list') + '<div>履歴はまだありません</div></div>');
+    } else if (scr === 'invites') {
+      header = custHeader('お友達紹介', { back: true });
+      showNav = true;
+      var iv = c.invites;
+      var listHtml = '';
+      if (!iv) listHtml = loadingBlock();
+      else if (!iv.codes.length) listHtml = '<div class="empty">' + svg('gift') + '<div>招待コードはまだありません。ご利用のたびにスタッフがお渡しします。</div></div>';
+      else listHtml = iv.codes.map(function (k, idx) {
+        return k.used
+          ? '<div class="inv-row used"><div class="inv-code num">' + esc(k.code) + '</div><div class="inv-meta">' + esc(k.usedByName || '新規会員') + ' さんが使用済み</div></div>'
+          : '<div class="inv-row"><div class="inv-code num">' + esc(k.code) + '</div><div class="inv-meta">利用可能 · 新規会員のみ</div>' +
+            '<div class="inv-btns"><button class="btn ghost sm" data-act="copycode" data-i="' + idx + '">コードをコピー</button>' +
+            '<button class="btn primary sm" data-act="copylink" data-i="' + idx + '">リンクをコピー</button></div></div>';
+      }).join('');
       body =
-        '<div class="code-entry">' +
-        '<div class="badge" style="width:60px;height:60px;">' + svg('ticket') + '</div>' +
-        '<div class="msg">请向店员出示手机，并输入店内当前显示的 6 位签到码</div>' +
-        '<div class="digits" id="digitswrap">' +
-        [0, 1, 2, 3, 4, 5].map(function (i) { return '<input maxlength="1" inputmode="numeric" data-i="' + i + '">'; }).join('') +
-        '</div>' +
-        '<div class="code-error">' + esc(c.checkinError) + '</div>' +
-        '<button class="btn primary block" data-act="submitcheckin" ' + (c.busy ? 'disabled' : '') + '>' + (c.busy ? '确认中…' : '确认签到') + '</button>' +
+        '<div class="invite-intro"><b>ご利用のたびに、スタッフが招待コードをお渡しします</b>' +
+        '<p>お友達が初めて LINE で登録するときに入力（またはあなたの招待リンクを開く）すると、あなたに <b class="num">' + (iv ? iv.inviterBonus : 100) + '</b> ポイント、お友達に <b class="num">' + (iv ? iv.inviteeBonus : 200) + '</b> ポイントが付与されます。コードは1回のみ有効で、ご自身では使えません。</p></div>' +
+        '<div class="inv-list">' + listHtml + '</div>';
+    } else if (scr === 'qr') {
+      header = custHeader('会員コード', { back: true });
+      showNav = true;
+      var sm = c.summary || {};
+      body =
+        '<div class="qr-screen">' +
+        '<div class="qr-card"><div id="qrbox" class="qrbox"><div class="qr-fail">生成中…</div></div></div>' +
+        '<div class="qr-name"><b>' + esc((c.qr && c.qr.displayName) || sm.displayName || '') + '</b></div>' +
+        '<div class="qr-bar"><div id="qrbar"></div></div>' +
+        '<div class="qr-cap" id="qrcap"></div>' +
+        '<p class="qr-tip">お会計の際にこの画面をスタッフにスキャンしてもらうと、ポイントの獲得・利用ができます。QRコードは60秒ごとに自動更新されるため、スクリーンショットは長くは使えません。</p>' +
         '</div>';
     } else if (scr === 'checkinSuccess') {
-      header = custHeader('到店签到', { back: true });
+      header = custHeader('毎日チェックイン', { back: true });
+      var r = c.lastCheckin || {};
       body =
         '<div class="checkin-success">' +
         '<div class="ring">' + svg('check') + '</div>' +
-        '<h3>签到成功！</h3>' +
-        '<p>获得 <b class="num" style="color:var(--brand)">+' + c.lastCheckinPoints + '</b> 积分，欢迎光临本町咖啡 ☕</p>' +
-        '<button class="btn primary block" data-act="gohome" style="margin-top:8px;">返回首页</button>' +
+        '<h3>チェックイン完了！</h3>' +
+        '<p>本日のチェックインで <b class="num" style="color:var(--brand)">+' + (r.basePoints || 0) + '</b> ポイント獲得</p>' +
+        (r.bonusPoints
+          ? '<div class="bonus-pop">' + svg('gift') + '<div><b>連続チェックイン ' + r.bonusDay + ' 日目ボーナス +' + r.bonusPoints + ' ポイント</b><span>' +
+            (r.streak >= r.cycleDays ? '' + r.cycleDays + ' 日達成おめでとうございます！明日からまた1日目から数えます' : 'この調子で、次のボーナスが待っています') + '</span></div></div>'
+          : '') +
+        '<div class="streak-line">連続チェックイン <b class="num">' + (r.streak || 1) + '</b> 日' + (r.nextMilestone ? ' · ' + nextHintText(r.streak >= r.cycleDays ? 0 : r.streak, r.nextMilestone, true) : '') + '</div>' +
+        '<button class="btn primary block" data-act="gohome" style="margin-top:8px;">ホームに戻る</button>' +
         '</div>';
     }
 
     var nav = showNav
       ? '<div class="bottomnav">' +
-        '<button data-act="gohome" class="' + (scr === 'home' ? 'active' : '') + '">' + svg('home') + '<span>首页</span></button>' +
-        '<button data-act="gohistory" class="' + (scr === 'history' ? 'active' : '') + '">' + svg('list') + '<span>消费记录</span></button>' +
+        '<button data-act="gohome" class="' + (scr === 'home' ? 'active' : '') + '">' + svg('home') + '<span>ホーム</span></button>' +
+        '<button data-act="goqr" class="' + (scr === 'qr' ? 'active' : '') + '">' + svg('qr') + '<span>会員コード</span></button>' +
+        '<button data-act="gohistory" class="' + (scr === 'history' ? 'active' : '') + '">' + svg('list') + '<span>利用履歴</span></button>' +
         '</div>'
       : '';
 
     document.getElementById('app').innerHTML =
       '<div class="phonewrap"><div class="phone"><div class="notch"></div>' + header + '<div class="phonebody">' + body + '</div>' + nav + '</div></div>';
     bindCustomerEvents();
+    if (scr === 'qr') updateQrDom();
+  }
+
+  function nextHintText(streak, nm, checkedToday) {
+    // streak: 目前有效连续天数；nm: {day, points}
+    var remain = nm.day - streak;
+    if (remain <= 0) return '';
+    if (remain === 1 && !checkedToday) return '今日チェックインすると ' + nm.day + ' 日目ボーナス +' + nm.points;
+    if (remain === 1) return '明日チェックインで ' + nm.day + ' 日目ボーナス +' + nm.points;
+    return 'あと ' + remain + ' 日連続（' + nm.day + ' 日目）でボーナス +' + nm.points;
+  }
+
+  function streakCardHtml(s, c) {
+    var cycle = s.cycleDays || 10;
+    var streak = s.streak || 0;
+    var b5 = s.rules.streak5Bonus || 0, b10 = s.rules.streak10Bonus || 0;
+    var dots = '';
+    for (var d = 1; d <= cycle; d++) {
+      var done = d <= streak;
+      var bonus = d === 5 ? b5 : (d === cycle ? b10 : 0);
+      dots += '<div class="sdot ' + (done ? 'done' : '') + (bonus ? ' milestone' : '') + '">' +
+        '<div class="c">' + (done ? svg('check') : (bonus ? svg('gift') : '<span class="num">' + d + '</span>')) + '</div>' +
+        '<div class="l num">' + (bonus ? '+' + bonus : d + '日目') + '</div></div>';
+    }
+    var hint = s.nextMilestone
+      ? nextHintText(streak >= cycle ? 0 : streak, s.nextMilestone, s.checkedInToday)
+      : '';
+    var btnLabel = s.checkedInToday ? '本日チェックイン済み' : (c.busy ? '処理中…' : 'チェックイン +' + s.rules.checkinPoints + ' ポイント');
+    return '<div class="card streak-card">' +
+      '<div class="sc-head"><div><b>毎日チェックイン</b><span>連続 ' + streak + ' 日' + (streak ? '' : ' · 今日から開始') + '</span></div>' +
+      '<div class="rule-tip">5日目 +' + b5 + ' · ' + cycle + '日目 +' + b10 + '</div></div>' +
+      '<div class="sdots">' + dots + '</div>' +
+      (hint ? '<div class="sc-hint">' + svg('zap') + '<span>' + esc(hint) + '</span></div>' : '') +
+      '<button class="btn primary block cta-sign" data-act="docheckin" ' + (s.checkedInToday || c.busy ? 'disabled' : '') + '>' + svg(s.checkedInToday ? 'check' : 'ticket') + ' ' + btnLabel + '</button>' +
+      '<div class="sc-foot">チェックインは1日1回。1日でも休むと、連続日数は1日目からやり直しになります</div>' +
+      '</div>';
   }
 
   function txRowHtml(t) {
@@ -327,9 +501,9 @@
     var iconName = isCheckin ? 'ticket' : (isBonus ? 'gift' : 'cup');
     var bg = isCheckin || isBonus ? 'var(--good-soft)' : 'var(--brand-soft)';
     var color = isCheckin || isBonus ? 'var(--good)' : 'var(--brand)';
-    var title = isCheckin ? '到店签到' : (isBonus ? (t.note || '新会员礼') : (t.note || '消费'));
+    var title = isCheckin ? (t.note || '毎日チェックイン') : (isBonus ? (t.note || '新規入会ボーナス') : (t.note || 'ご利用'));
     var netPoints = (t.earnedPoints || 0) - (t.redeemedPoints || 0);
-    var amtLine = (t.type === 'purchase') ? ('<small>付 ' + fmt(t.paidAmount) + ' 元' + (t.redeemedPoints ? '（折抵' + fmt(t.discount) + '元）' : '') + '</small>') : '';
+    var amtLine = (t.type === 'purchase') ? ('<small>お支払い ' + fmt(t.paidAmount) + ' 円' + (t.redeemedPoints ? '（ポイント利用 ' + fmt(t.discount) + ' 円）' : '') + '</small>') : '';
     return '<div class="tx-row">' +
       '<div class="ic" style="background:' + bg + ';color:' + color + '">' + svg(iconName) + '</div>' +
       '<div class="mid"><b>' + esc(title) + '</b><span>' + fmtTime(t.ts) + (t.staffName ? ' · ' + esc(t.staffName) : '') + '</span></div>' +
@@ -337,70 +511,91 @@
       '</div>';
   }
 
+  var checkInviteDebounced = debounce(async function () {
+    var c = state.customer;
+    var raw = (c.inviteInput || '').replace(/[^A-Za-z0-9]/g, '');
+    if (raw.length !== 8) { c.inviteStatus = raw ? { kind: 'err', text: '招待コードは英数字8文字です' } : null; updateInviteStatusDom(); return; }
+    try {
+      var r = await api('GET', '/api/auth/invite/check?code=' + encodeURIComponent(raw));
+      c.inviteStatus = r.status === 'ok' ? { kind: 'ok', text: '招待コードは有効です！登録すると ' + r.inviteeBonus + ' ポイント獲得できます' }
+        : r.status === 'used' ? { kind: 'err', text: 'この招待コードはすでに使用されています' }
+        : { kind: 'err', text: '招待コードが見つかりません。もう一度ご確認ください' };
+    } catch (e) { c.inviteStatus = null; }
+    updateInviteStatusDom();
+  }, 350);
+  function updateInviteStatusDom() {
+    var el = document.getElementById('invitestatus');
+    var c = state.customer;
+    if (!el) return;
+    el.className = 'invite-status ' + (c.inviteStatus ? c.inviteStatus.kind : '');
+    el.textContent = c.inviteStatus ? c.inviteStatus.text : '';
+  }
+
   function bindCustomerEvents() {
     var app = document.getElementById('app');
+    var inviteEl = app.querySelector('#invitecode');
+    if (inviteEl) {
+      inviteEl.addEventListener('input', function () {
+        var raw = inviteEl.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+        inviteEl.value = raw.length > 4 ? raw.slice(0, 4) + '-' + raw.slice(4) : raw;
+        state.customer.inviteInput = inviteEl.value;
+        checkInviteDebounced();
+      });
+      if (state.customer.inviteInput && !state.customer.inviteStatus) checkInviteDebounced();
+    }
     app.querySelectorAll('[data-act]').forEach(function (el) {
       el.addEventListener('click', async function () {
         var act = el.getAttribute('data-act');
         var c = state.customer;
         if (act === 'linelogin') {
-          location.href = '/api/auth/line/login';
+          var inv = (c.inviteInput || '').replace(/[^A-Za-z0-9]/g, '');
+          location.href = '/api/auth/line/login' + (inv ? '?invite=' + encodeURIComponent(inv) : '');
         } else if (act === 'back') {
-          c.screen = (c.screen === 'checkin' || c.screen === 'checkinSuccess' || c.screen === 'history') ? 'home' : 'login';
+          c.screen = (c.screen === 'checkinSuccess' || c.screen === 'history' || c.screen === 'qr' || c.screen === 'invites') ? 'home' : 'login';
           render();
         } else if (act === 'logout') {
           await api('POST', '/api/auth/member/logout').catch(function () {});
           state.session.member = null;
-          state.customer = { screen: 'login', summary: null, transactions: null, loading: false, checkinError: '', lastCheckinPoints: 0, loginError: '' };
+          state.customer = { screen: 'login', summary: null, transactions: null, loading: false, lastCheckin: null, loginError: '' };
           render();
         } else if (act === 'gohome') {
           c.screen = 'home';
           render();
           loadCustomerHome();
+        } else if (act === 'goinvites') {
+          c.screen = 'invites';
+          render();
+          try { c.invites = await api('GET', '/api/me/invites'); } catch (e) { toast(e.message, 'err'); }
+          render();
+        } else if (act === 'copycode' || act === 'copylink') {
+          var kk = c.invites && c.invites.codes[parseInt(el.getAttribute('data-i'), 10)];
+          if (kk) copyText(act === 'copycode' ? kk.code : kk.shareUrl, act === 'copycode' ? '招待コードをコピーしました' : '招待リンクをコピーしました。お友達に送りましょう');
+        } else if (act === 'goqr') {
+          c.screen = 'qr';
+          render();
+          startQrTimer();
         } else if (act === 'gohistory') {
           c.screen = 'history';
           render();
-        } else if (act === 'gocheckin') {
-          if (c.summary && c.summary.checkedInToday) { toast('今日已经签到过囉，明天再来吧！'); return; }
-          c.checkinError = '';
-          c.screen = 'checkin';
-          render();
-        } else if (act === 'submitcheckin') {
-          var inputs = app.querySelectorAll('#digitswrap input');
-          var code = '';
-          inputs.forEach(function (i) { code += (i.value || '').trim(); });
-          if (code.length !== 6) { c.checkinError = '请输入完整的 6 位数字'; render(); return; }
-          c.busy = true; c.checkinError = ''; render();
+        } else if (act === 'docheckin') {
+          if (c.busy || (c.summary && c.summary.checkedInToday)) return;
+          c.busy = true; render();
           try {
-            var res = await api('POST', '/api/me/checkin', { code: code });
-            c.lastCheckinPoints = res.pointsEarned;
+            var res = await api('POST', '/api/me/checkin');
+            c.lastCheckin = res;
             c.screen = 'checkinSuccess';
             c.busy = false;
             render();
             loadCustomerHome();
           } catch (e) {
             c.busy = false;
-            c.checkinError = e.message;
+            toast(e.message, 'err');
             render();
+            loadCustomerHome();
           }
         }
       });
     });
-
-    var digitInputs = app.querySelectorAll('#digitswrap input');
-    if (digitInputs.length) {
-      digitInputs.forEach(function (inp, idx) {
-        inp.addEventListener('input', function () {
-          inp.value = inp.value.replace(/[^0-9]/g, '').slice(0, 1);
-          if (inp.value && digitInputs[idx + 1]) digitInputs[idx + 1].focus();
-        });
-        inp.addEventListener('keydown', function (e) {
-          if (e.key === 'Backspace' && !inp.value && digitInputs[idx - 1]) digitInputs[idx - 1].focus();
-          if (e.key === 'Enter') app.querySelector('[data-act="submitcheckin"]').click();
-        });
-      });
-      digitInputs[0].focus();
-    }
   }
 
   /* ================================================================ */
@@ -410,12 +605,12 @@
   function renderStaffLoginForm(onLoggedInMessage) {
     var a = state.staffAuth;
     return '<div class="staff-login-wrap"><div class="card staff-login">' +
-      '<div class="lg"><div class="badge">' + svg('lock') + '</div><h3>店员 / 管理员登入</h3><p>' + esc(onLoggedInMessage || '请使用店家提供的帐号密码登入') + '</p></div>' +
+      '<div class="lg"><div class="badge">' + svg('lock') + '</div><h3>スタッフ / 管理者ログイン</h3><p>' + esc(onLoggedInMessage || 'お店から案内されたアカウントとパスワードでログインしてください') + '</p></div>' +
       (a.error ? '<div class="banner crit">' + svg('alert') + '<span>' + esc(a.error) + '</span></div>' : '') +
-      '<div class="field"><label>帐号</label><input class="input" id="staffuser" value="' + esc(a.form.username) + '" autocomplete="username"></div>' +
-      '<div class="field"><label>密码</label><input class="input" id="staffpass" type="password" value="' + esc(a.form.password) + '" autocomplete="current-password"></div>' +
-      '<button class="btn primary block" data-act="stafflogin" ' + (a.busy ? 'disabled' : '') + '>' + (a.busy ? '登入中…' : '登入') + '</button>' +
-      '<div class="hint-box">首次部署的预设管理员帐号请见后端 <code>.env</code> / README 的 <b>SEED_ADMIN_USERNAME</b> 设定；请尽快在「商家后台 → 员工帐号」新增其他帐号并修改预设密码。</div>' +
+      '<div class="field"><label>アカウント</label><input class="input" id="staffuser" value="' + esc(a.form.username) + '" autocomplete="username"></div>' +
+      '<div class="field"><label>パスワード</label><input class="input" id="staffpass" type="password" value="' + esc(a.form.password) + '" autocomplete="current-password"></div>' +
+      '<button class="btn primary block" data-act="stafflogin" ' + (a.busy ? 'disabled' : '') + '>' + (a.busy ? 'ログイン中…' : 'ログイン') + '</button>' +
+      '<div class="hint-box">初回デプロイ時のデフォルト管理者アカウントは、バックエンドの <code>.env</code> / README の <b>SEED_ADMIN_USERNAME</b> 設定をご確認ください。早めに「管理画面 → スタッフアカウント」で別のアカウントを追加し、デフォルトのパスワードを変更してください。</div>' +
       '</div></div>';
   }
 
@@ -429,7 +624,7 @@
     if (btn) {
       var submit = async function () {
         var a = state.staffAuth;
-        if (!a.form.username || !a.form.password) { a.error = '请输入帐号与密码'; render(); return; }
+        if (!a.form.username || !a.form.password) { a.error = 'アカウントとパスワードを入力してください'; render(); return; }
         a.busy = true; a.error = ''; render();
         try {
           var staff = await api('POST', '/api/auth/staff/login', { username: a.form.username, password: a.form.password });
@@ -452,8 +647,8 @@
 
   async function staffLogoutClick() {
     await api('POST', '/api/auth/staff/logout').catch(function () {});
+    stopScan();
     state.session.staff = null;
-    state.staff.code = null;
     state.admin.overview = null;
     render();
   }
@@ -462,52 +657,119 @@
   /* =========================  店员收银台  ========================== */
   /* ================================================================ */
 
-  var codeTickerHandle = null;
-
-  function stopCodeTicker() {
-    if (codeTickerHandle) { clearInterval(codeTickerHandle); codeTickerHandle = null; }
-  }
-
   async function loadStaffTab() {
     var t = state.staff.tab;
-    if (t === 'code') {
-      await refreshStaffCode();
-      stopCodeTicker();
-      codeTickerHandle = setInterval(function () {
-        if (state.role !== 'staff' || state.staff.tab !== 'code' || !state.session.staff) { stopCodeTicker(); return; }
-        refreshStaffCode(true);
-      }, 1000);
-    } else {
-      stopCodeTicker();
-      if (t === 'checkout') await searchStaffMembers();
-      if (t === 'log') await refreshTodayLog();
+    if (t === 'checkout' && state.staff.searchOpen) await searchStaffMembers();
+    if (t === 'log') await refreshTodayLog();
+  }
+
+  /* ---------- 收银台：扫描会员二维码 ---------- */
+  var scanStream = null;
+  var scanTimer = null;
+  var scanDetector = null;
+  var scanCanvas = null;
+  var scanLooking = false;
+  var lastBadCode = { code: '', at: 0 };
+
+  function stopScan() {
+    if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+    if (scanStream) { scanStream.getTracks().forEach(function (t) { t.stop(); }); scanStream = null; }
+    scanLooking = false;
+    if (state.staff && state.staff.scan) state.staff.scan.active = false;
+  }
+
+  async function startScan() {
+    var sc = state.staff.scan;
+    sc.error = '';
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      sc.error = 'このブラウザではカメラを使用できません（https のURLが必要です）。バーコードリーダーを使うか、下に手入力してください。';
+      render();
+      return;
+    }
+    try {
+      scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    } catch (e) {
+      sc.error = 'カメラを起動できません。ブラウザでカメラを許可するか、バーコードリーダー / 手入力をご利用ください。';
+      render();
+      return;
+    }
+    try { await loadScriptOnce('/vendor/jsQR.js'); } catch (e) { /* 有 BarcodeDetector 的浏览器不需要它 */ }
+    scanDetector = null;
+    if ('BarcodeDetector' in window) {
+      try { scanDetector = new window.BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { scanDetector = null; }
+    }
+    sc.active = true;
+    render();
+  }
+
+  function attachScanVideo() {
+    var v = document.getElementById('scanvideo');
+    if (!v || !scanStream) return;
+    v.srcObject = scanStream;
+    v.play().catch(function () {});
+    if (scanTimer) clearInterval(scanTimer);
+    scanTimer = setInterval(function () { scanFrame(v); }, 200);
+  }
+
+  async function scanFrame(v) {
+    if (scanLooking || !scanStream || v.readyState < 2 || !v.videoWidth) return;
+    scanLooking = true;
+    try {
+      var found = null;
+      if (scanDetector) {
+        try {
+          var codes = await scanDetector.detect(v);
+          if (codes && codes.length) found = codes[0].rawValue;
+        } catch (e) { scanDetector = null; }
+      }
+      if (!found && !scanDetector && window.jsQR) {
+        var w = Math.min(640, v.videoWidth);
+        var h = Math.round(w * v.videoHeight / v.videoWidth);
+        if (!scanCanvas) scanCanvas = document.createElement('canvas');
+        scanCanvas.width = w; scanCanvas.height = h;
+        var ctx = scanCanvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(v, 0, 0, w, h);
+        var img = ctx.getImageData(0, 0, w, h);
+        var r = window.jsQR(img.data, w, h, { inversionAttempts: 'dontInvert' });
+        if (r) found = r.data;
+      }
+      if (found) await handleScanned(found);
+    } finally {
+      scanLooking = false;
     }
   }
 
-  async function refreshStaffCode(silent) {
+  async function handleScanned(code) {
+    var sc = state.staff.scan;
+    code = String(code || '').trim();
+    if (!code || sc.busy) return;
+    if (code.indexOf('BMQ:') !== 0) {
+      // 不是会员码（例如扫到别的 QR）：提示一下，同一张 2 秒内不重复提示
+      if (lastBadCode.code === code && Date.now() - lastBadCode.at < 2000) return;
+      lastBadCode = { code: code, at: Date.now() };
+      sc.error = '会員のQRコードではありません。お客様に LINE の「会員コード」画面を開いてもらってください。';
+      updateScanErrorDom();
+      return;
+    }
+    sc.busy = true;
     try {
-      var data = await api('GET', '/api/staff/code');
-      state.staff.code = data;
-      if (silent) updateCodeWidgetDom(); else render();
+      var res = await api('POST', '/api/staff/scan', { code: code });
+      stopScan();
+      state.staff.selectedMember = res.member;
+      state.staff.checkoutForm = { orderAmount: '', redeemOn: false, redeemPoints: 0 };
+      sc.error = ''; sc.input = ''; sc.busy = false;
+      toast('会員を認識しました：' + res.member.displayName);
+      render();
     } catch (e) {
-      if (!silent) { toast(e.message, 'err'); render(); }
+      sc.busy = false;
+      sc.error = e.message;
+      if (scanStream) updateScanErrorDom(); else render();
     }
   }
-  function updateCodeWidgetDom() {
-    var c = state.staff.code;
-    if (!c) return;
-    var txt = document.getElementById('codebigtext');
-    var cap = document.getElementById('codecap');
-    var arc = document.getElementById('codearc');
-    var cnt = document.getElementById('todaycheckincount');
-    if (txt) txt.textContent = c.code;
-    if (cap) cap.textContent = '顾客到店后请出示此码，约 ' + c.secondsRemaining + ' 秒后自动更新';
-    if (cnt) cnt.textContent = c.todayCheckins;
-    if (arc && state.admin.rules) {
-      var ttl = state.admin.rules.codeTTL || 60;
-      var frac = 1 - c.secondsRemaining / ttl;
-      arc.setAttribute('stroke-dashoffset', String(163.4 * frac));
-    }
+
+  function updateScanErrorDom() {
+    var el = document.getElementById('scanerr');
+    if (el) el.textContent = state.staff.scan.error || '';
   }
 
   async function searchStaffMembers() {
@@ -528,32 +790,20 @@
 
   function renderStaff() {
     if (!state.session.staff) {
-      document.getElementById('app').innerHTML = renderStaffLoginForm('登入后即可使用签到码显示与收银结账功能');
+      document.getElementById('app').innerHTML = renderStaffLoginForm('ログインするとお会計と本日の取引を利用できます');
       bindStaffLoginEvents();
       return;
     }
 
     var tabs = '<div class="tabbar">' +
-      ['code', 'checkout', 'log'].map(function (t) {
-        var lbl = t === 'code' ? '签到码' : (t === 'checkout' ? '收银结账' : '今日流水');
-        var icon = t === 'code' ? 'ticket' : (t === 'checkout' ? 'wallet' : 'list');
+      ['checkout', 'log'].map(function (t) {
+        var lbl = t === 'checkout' ? 'お会計' : '本日の取引';
+        var icon = t === 'checkout' ? 'wallet' : 'list';
         return '<button data-tab="' + t + '" class="' + (state.staff.tab === t ? 'active' : '') + '">' + svg(icon) + lbl + '</button>';
       }).join('') + '</div>';
 
     var content = '';
-    if (state.staff.tab === 'code') {
-      var c = state.staff.code;
-      content = c
-        ? '<div class="card codeboard">' +
-          '<div class="codering"><svg viewBox="0 0 60 60"><circle class="track" cx="30" cy="30" r="26"></circle><circle class="bar" id="codearc" cx="30" cy="30" r="26" stroke-dasharray="163.4" stroke-dashoffset="0"></circle></svg>' +
-          '<div class="digitsbig num" id="codebigtext">' + esc(c.code) + '</div></div>' +
-          '<div class="cap" id="codecap">顾客到店后请出示此码，约 ' + c.secondsRemaining + ' 秒后自动更新</div>' +
-          '<div class="stub"><span>本町咖啡 · 到店签到票</span><span class="num" id="checkinpts">积分</span></div>' +
-          '<button class="btn ghost sm" data-act="regen">' + svg('refresh') + ' 立即更换签到码</button>' +
-          '<div class="today-checkins">' + svg('users') + ' 今日已有 <b class="num" id="todaycheckincount">' + c.todayCheckins + '</b> 人次到店签到</div>' +
-          '</div>'
-        : loadingBlock();
-    } else if (state.staff.tab === 'checkout') {
+    if (state.staff.tab === 'checkout') {
       content = renderStaffCheckout();
     } else {
       var log = state.staff.todayLog;
@@ -563,22 +813,22 @@
         var rows = log.transactions.map(function (t) {
           var net = (t.earnedPoints || 0) - (t.redeemedPoints || 0);
           return '<tr><td>' + fmtTime(t.ts).split(' ')[1] + '</td><td class="name">' + esc(t.memberName) + '</td>' +
-            '<td>' + (t.type === 'checkin' ? '<span class="pill good">签到</span>' : '<span class="pill blue">消费</span>') + '</td>' +
-            '<td class="num">' + (t.type === 'purchase' ? fmt(t.paidAmount) + ' 元' : '—') + '</td>' +
+            '<td>' + (t.type === 'checkin' ? '<span class="pill good">チェックイン</span>' : (t.type === 'bonus' ? '<span class="pill gold">ボーナス</span>' : '<span class="pill blue">ご利用</span>')) + '</td>' +
+            '<td class="num">' + (t.type === 'purchase' ? fmt(t.paidAmount) + ' 円' : '—') + '</td>' +
             '<td class="num delta ' + (net >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(net) + '</td></tr>';
         }).join('');
         content = '<div class="card padcard stack">' +
-          '<div class="tablewrap"><table class="logtable"><thead><tr><th>时间</th><th>会员</th><th>类型</th><th>金额</th><th>积分变化</th></tr></thead><tbody>' +
-          (rows || '<tr><td colspan="5"><div class="empty">' + svg('list') + '<div>今日尚无纪录</div></div></td></tr>') +
+          '<div class="tablewrap"><table class="logtable"><thead><tr><th>時刻</th><th>会員</th><th>種別</th><th>金額</th><th>ポイント増減</th></tr></thead><tbody>' +
+          (rows || '<tr><td colspan="5"><div class="empty">' + svg('list') + '<div>本日の記録はありません</div></div></td></tr>') +
           '</tbody></table></div>' +
-          '<div class="foottotals"><span>今日营收 <b class="num">' + fmt(log.revenue) + ' 元</b></span><span>今日发放积分 <b class="num" style="color:var(--brand)">+' + fmt(log.issued) + '</b></span><span>今日核销积分 <b class="num" style="color:var(--blue)">-' + fmt(log.redeemed) + '</b></span></div>' +
+          '<div class="foottotals"><span>本日の売上 <b class="num">' + fmt(log.revenue) + ' 円</b></span><span>本日の付与ポイント <b class="num" style="color:var(--brand)">+' + fmt(log.issued) + '</b></span><span>本日の利用ポイント <b class="num" style="color:var(--blue)">-' + fmt(log.redeemed) + '</b></span></div>' +
           '</div>';
       }
     }
 
     document.getElementById('app').innerHTML =
       '<div class="staffwrap"><div class="staffcard">' +
-      '<div class="staff-head"><h2>收银台</h2><div class="top-actions"><div class="op-badge"><span class="dot"></span>' + esc(state.session.staff.name) + '（' + (state.session.staff.role === 'admin' ? '管理员' : '店员') + '）</div><button class="icon-btn" data-act="stafflogout" title="登出">' + svg('logout') + '</button></div></div>' +
+      '<div class="staff-head"><h2>レジ</h2><div class="top-actions"><div class="op-badge"><span class="dot"></span>' + esc(state.session.staff.name) + '（' + (state.session.staff.role === 'admin' ? '管理者' : 'スタッフ') + '）</div><button class="icon-btn" data-act="stafflogout" title="ログアウト">' + svg('logout') + '</button></div></div>' +
       tabs + content +
       '</div></div>';
     bindStaffEvents();
@@ -591,11 +841,11 @@
       ? s.members.map(function (m) {
           return '<button class="member-pick ' + (sel && sel.id === m.id ? 'selected' : '') + '" data-act="pickmember" data-id="' + m.id + '">' +
             '<div class="av" style="background:' + avatarColor(m.id) + '">' + esc(initials(m.displayName)) + '</div>' +
-            '<div class="info"><b>' + esc(m.displayName) + '</b><span>' + esc(m.phone || 'LINE 会员') + '</span></div>' +
-            '<div class="pts num">' + fmt(m.points) + ' 点</div>' +
+            '<div class="info"><b>' + esc(m.displayName) + '</b><span>' + esc(m.phone || 'LINE会員') + '</span></div>' +
+            '<div class="pts num">' + fmt(m.points) + ' ポイント</div>' +
             '</button>';
         }).join('')
-      : '<div class="empty">' + svg('search') + '<div>找不到符合的会员</div></div>';
+      : '<div class="empty">' + svg('search') + '<div>該当する会員が見つかりません</div></div>';
 
     var f = s.checkoutForm;
     var amount = parseFloat(f.orderAmount) || 0;
@@ -609,29 +859,56 @@
     var payable = Math.max(0, amount - discount);
     var earn = Math.floor(payable / earnRate);
 
+    var sc = s.scan;
+    var memberPart;
+    if (sel) {
+      memberPart = '<div class="selected-bar"><div class="av" style="background:' + avatarColor(sel.id) + '">' + esc(initials(sel.displayName)) + '</div><b>' + esc(sel.displayName) + '</b><span>現在 ' + fmt(sel.points) + ' ポイント</span><button class="chg" data-act="clearmember">別の会員</button></div>';
+    } else {
+      memberPart = '<div class="scanpanel">' +
+        '<div class="st">お客様の会員QRコードをスキャン</div>' +
+        (sc.active
+          ? '<div class="scanbox"><video id="scanvideo" playsinline muted></video><div class="frame"></div></div>' +
+            '<button class="btn ghost block" data-act="stopscan">' + svg('close') + ' カメラを閉じる</button>'
+          : '<button class="btn primary block" data-act="startscan">' + svg('qr') + ' カメラでスキャン</button>') +
+        '<div class="scanerr" id="scanerr">' + esc(sc.error) + '</div>' +
+        '<div class="field"><label>バーコードリーダー、または会員コードを貼り付け</label>' +
+        '<input class="input" id="scaninput" autocomplete="off" placeholder="ここにカーソルを置いてバーコードリーダーでスキャン" value="' + esc(sc.input) + '"></div>' +
+        '<div class="scanhint">会員コードはお客様の LINE の「会員コード」画面に表示され、60秒ごとに自動更新されます。期限切れのコードは受け付けられません。</div>' +
+        '<button class="linkbtn" data-act="togglesearch">' + (s.searchOpen ? '閉じる' : 'スキャンできない場合は氏名・電話番号で検索') + '</button>' +
+        (s.searchOpen
+          ? '<div class="member-search">' + svg('search') + '<input class="input" id="staffsearch" placeholder="氏名または電話番号で検索" value="' + esc(s.memberSearch) + '"></div>' +
+            '<div class="member-list">' + memberListHtml + '</div>'
+          : '') +
+        '</div>';
+    }
+
+    var inviteBanner = s.lastInvite
+      ? '<div class="invite-banner"><div class="ib-top">' + svg('gift') + '<div><b>招待コードを ' + esc(s.lastInvite.memberName) + ' さんにお渡しください</b>' +
+        '<span>ご利用ごとに1つ進呈。新規会員が初回登録時に入力すると、双方にポイントが付与されます。お客様は LINE の「お友達紹介」でも確認できます。</span></div></div>' +
+        '<div class="ib-code num">' + esc(s.lastInvite.code) + '</div>' +
+        '<div class="ib-btns"><button class="btn ghost sm" data-act="copyinvite">コピー</button><button class="btn ghost sm" data-act="closeinvite">閉じる</button></div></div>'
+      : '';
+
     return '<div class="card padcard stack">' +
-      '<div class="field"><label>选择会员</label>' +
-      '<div class="member-search">' + svg('search') + '<input class="input" id="staffsearch" placeholder="搜寻姓名或电话" value="' + esc(s.memberSearch) + '"></div>' +
-      '</div>' +
-      '<div class="member-list">' + memberListHtml + '</div>' +
-      (sel ? '<div class="selected-bar"><div class="av" style="background:' + avatarColor(sel.id) + '">' + esc(initials(sel.displayName)) + '</div><b>' + esc(sel.displayName) + '</b><span>目前 ' + fmt(sel.points) + ' 点</span><button class="chg" data-act="clearmember">更换</button></div>' : '') +
-      '<div class="field amountbox"><label>订单金额（元）</label><input class="input num" id="orderamount" type="number" min="0" inputmode="decimal" placeholder="0" value="' + esc(f.orderAmount) + '" ' + (sel ? '' : 'disabled') + '></div>' +
-      '<div class="redeem-row"><span style="font-size:13px;font-weight:700;">使用积分折抵</span>' +
+      inviteBanner +
+      memberPart +
+      '<div class="field amountbox"><label>お会計金額（円）</label><input class="input num" id="orderamount" type="number" min="0" inputmode="decimal" placeholder="0" value="' + esc(f.orderAmount) + '" ' + (sel ? '' : 'disabled') + '></div>' +
+      '<div class="redeem-row"><span style="font-size:13px;font-weight:700;">ポイント利用</span>' +
       '<label class="switch"><input type="checkbox" id="redeemtoggle" ' + (f.redeemOn ? 'checked' : '') + ' ' + (sel && maxUse > 0 ? '' : 'disabled') + '><span class="track"></span><span class="knob"></span></label>' +
       '</div>' +
       (f.redeemOn && sel
         ? '<div class="redeem-panel">' +
           '<input type="range" class="redeem-slider" id="redeemslider" min="0" max="' + maxUse + '" step="1" value="' + redeemPts + '" ' + (maxUse <= 0 ? 'disabled' : '') + '>' +
-          '<div class="field" style="flex-direction:row; align-items:center; gap:8px;"><span class="hint">折抵</span><input class="input num" id="redeemnum" type="number" min="0" max="' + maxUse + '" value="' + redeemPts + '" style="width:90px;"><span class="hint">积分（最多 ' + maxUse + ' 点，即本单 ' + maxRedeemPercent + '% 上限）</span></div>' +
+          '<div class="field" style="flex-direction:row; align-items:center; gap:8px;"><span class="hint">利用</span><input class="input num" id="redeemnum" type="number" min="0" max="' + maxUse + '" value="' + redeemPts + '" style="width:90px;"><span class="hint">ポイント（最大 ' + maxUse + ' ポイント・今回のお会計の ' + maxRedeemPercent + '% が上限）</span></div>' +
           '</div>'
         : '') +
       '<div class="summary">' +
-      '<div class="row"><span>订单金额</span><b class="num">' + fmt(amount) + ' 元</b></div>' +
-      '<div class="row"><span>积分折抵</span><b class="num" style="color:var(--blue);">- ' + fmt(discount) + ' 元</b></div>' +
-      '<div class="row total"><span>应付金额</span><b class="num">' + fmt(payable) + ' 元</b></div>' +
-      '<div class="row earn"><span>本次预计获得积分</span><b class="num">+' + earn + ' 点</b></div>' +
+      '<div class="row"><span>お会計金額</span><b class="num">' + fmt(amount) + ' 円</b></div>' +
+      '<div class="row"><span>ポイント利用</span><b class="num" style="color:var(--blue);">- ' + fmt(discount) + ' 円</b></div>' +
+      '<div class="row total"><span>お支払い金額</span><b class="num">' + fmt(payable) + ' 円</b></div>' +
+      '<div class="row earn"><span>今回の獲得予定ポイント</span><b class="num">+' + earn + ' ポイント</b></div>' +
       '</div>' +
-      '<button class="btn primary block" data-act="confirmpay" ' + (sel && amount > 0 && !state.staff.busy ? '' : 'disabled') + '>' + svg('check') + (state.staff.busy ? ' 处理中…' : ' 确认收款') + '</button>' +
+      '<button class="btn primary block" data-act="confirmpay" ' + (sel && amount > 0 && !state.staff.busy ? '' : 'disabled') + '>' + svg('check') + (state.staff.busy ? ' 処理中…' : ' 会計を確定') + '</button>' +
       '</div>';
   }
 
@@ -650,12 +927,20 @@
         var s = state.staff;
         if (act === 'stafflogout') {
           staffLogoutClick();
-        } else if (act === 'regen') {
-          try {
-            state.staff.code = Object.assign({}, state.staff.code, await api('POST', '/api/staff/code/regenerate'));
-            toast('已产生新的签到码');
-            render();
-          } catch (e) { toast(e.message, 'err'); }
+        } else if (act === 'copyinvite') {
+          if (s.lastInvite) copyText(s.lastInvite.code, '招待コードをコピーしました');
+        } else if (act === 'closeinvite') {
+          s.lastInvite = null;
+          render();
+        } else if (act === 'startscan') {
+          startScan();
+        } else if (act === 'stopscan') {
+          stopScan();
+          render();
+        } else if (act === 'togglesearch') {
+          s.searchOpen = !s.searchOpen;
+          render();
+          if (s.searchOpen) searchStaffMembers();
         } else if (act === 'pickmember') {
           var id = el.getAttribute('data-id');
           s.selectedMember = s.members.filter(function (m) { return m.id === id; })[0] || null;
@@ -676,12 +961,13 @@
               orderAmount: amount,
               redeemPoints: f.redeemOn ? (f.redeemPoints || 0) : 0
             });
-            toast(res.member.displayName + ' 获得 ' + res.transaction.earnedPoints + ' 积分' + (res.transaction.redeemedPoints > 0 ? '，本单折抵 ' + fmt(res.transaction.discount) + ' 元' : '') + '，收款成功！');
+            s.lastInvite = { memberName: res.member.displayName, code: res.inviteCode, url: res.inviteShareUrl };
+            toast(res.member.displayName + ' さんに ' + res.transaction.earnedPoints + ' ポイント付与' + (res.transaction.redeemedPoints > 0 ? '、ポイント利用 ' + fmt(res.transaction.discount) + ' 円' : '') + '。会計が完了しました！');
             s.selectedMember = null;
             s.checkoutForm = { orderAmount: '', redeemOn: false, redeemPoints: 0 };
             s.busy = false;
             render();
-            searchStaffMembers();
+            if (s.searchOpen) searchStaffMembers();
           } catch (e) {
             s.busy = false;
             toast(e.message, 'err');
@@ -691,6 +977,16 @@
       });
     });
 
+    var scanInput = app.querySelector('#scaninput');
+    if (scanInput) {
+      scanInput.addEventListener('input', function () { state.staff.scan.input = scanInput.value; });
+      scanInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); handleScanned(scanInput.value); }
+      });
+      // 平板 / 电脑上自动把光标放进来，扫码枪才能直接使用；手机上不自动弹出键盘
+      if (!state.staff.scan.active && window.matchMedia && window.matchMedia('(pointer: fine)').matches) scanInput.focus();
+    }
+    if (state.staff.scan.active) attachScanVideo();
     var searchEl = app.querySelector('#staffsearch');
     if (searchEl) {
       searchEl.addEventListener('input', function () {
@@ -724,11 +1020,11 @@
   /* ================================================================ */
 
   var ADMIN_TABS = [
-    { id: 'overview', label: '总览', icon: 'trend' },
-    { id: 'members', label: '会员管理', icon: 'users' },
-    { id: 'rules', label: '积分规则', icon: 'sliders' },
-    { id: 'ledger', label: '积分记录', icon: 'list' },
-    { id: 'staffacct', label: '员工帐号', icon: 'shield' }
+    { id: 'overview', label: '概要', icon: 'trend' },
+    { id: 'members', label: '会員管理', icon: 'users' },
+    { id: 'rules', label: 'ポイントルール', icon: 'sliders' },
+    { id: 'ledger', label: 'ポイント履歴', icon: 'list' },
+    { id: 'staffacct', label: 'スタッフアカウント', icon: 'shield' }
   ];
 
   async function loadAdminTab() {
@@ -761,15 +1057,15 @@
 
   function renderAdmin() {
     if (!state.session.staff) {
-      document.getElementById('app').innerHTML = renderStaffLoginForm('登入后即可管理会员、积分规则与查看营运数据');
+      document.getElementById('app').innerHTML = renderStaffLoginForm('ログインすると会員・ポイントルールの管理と営業データの確認ができます');
       bindStaffLoginEvents();
       return;
     }
     if (state.session.staff.role !== 'admin') {
       document.getElementById('app').innerHTML =
-        '<div class="card perm-block"><div class="ic">' + svg('alert') + '</div><h3>此帐号没有后台管理权限</h3>' +
-        '<p>「' + esc(state.session.staff.name) + '」目前是店员帐号，只能使用收银台。如需查看后台，请用管理员帐号登入。</p>' +
-        '<button class="btn ghost sm" data-act="stafflogout2">登出，改用其他帐号</button></div>';
+        '<div class="card perm-block"><div class="ic">' + svg('alert') + '</div><h3>このアカウントには管理画面の権限がありません</h3>' +
+        '<p>「' + esc(state.session.staff.name) + '」は現在スタッフアカウントのため、レジのみ利用できます。管理画面を見るには管理者アカウントでログインしてください。</p>' +
+        '<button class="btn ghost sm" data-act="stafflogout2">ログアウトして別のアカウントを使う</button></div>';
       var b = document.querySelector('[data-act="stafflogout2"]');
       if (b) b.addEventListener('click', staffLogoutClick);
       return;
@@ -788,7 +1084,7 @@
 
     document.getElementById('app').innerHTML =
       '<div class="admin-grid">' + nav + '<div class="stack">' +
-      '<div style="display:flex;justify-content:flex-end;"><button class="icon-btn" data-act="stafflogout" title="登出">' + svg('logout') + '</button></div>' +
+      '<div style="display:flex;justify-content:flex-end;"><button class="icon-btn" data-act="stafflogout" title="ログアウト">' + svg('logout') + '</button></div>' +
       content + '</div></div>';
     bindAdminEvents();
   }
@@ -827,18 +1123,18 @@
 
     return '<div class="stack">' +
       '<div class="kpi-grid">' +
-      kpiTile('users', '总会员数', fmt(o.memberCount), '累计注册会员', 'var(--brand)', 'var(--brand-soft)') +
-      kpiTile('ticket', '今日到店签到', fmt(o.todayCheckins), '人次 · 今日', 'var(--good)', 'var(--good-soft)') +
-      kpiTile('arrowUpRight', '今日发放积分', '+' + fmt(o.todayIssued), '消费 + 签到', 'var(--brand)', 'var(--brand-soft)') +
-      kpiTile('tag', '今日核销积分', '-' + fmt(o.todayRedeemed), '用于折抵消费', 'var(--blue)', 'var(--blue-soft)') +
+      kpiTile('users', '会員数合計', fmt(o.memberCount), '累計登録会員', 'var(--brand)', 'var(--brand-soft)') +
+      kpiTile('ticket', '本日のチェックイン', fmt(o.todayCheckins), '件 · お客様のセルフチェックイン', 'var(--good)', 'var(--good-soft)') +
+      kpiTile('arrowUpRight', '本日の付与ポイント', '+' + fmt(o.todayIssued), 'ご利用 + チェックイン + ボーナス', 'var(--brand)', 'var(--brand-soft)') +
+      kpiTile('tag', '本日の利用ポイント', '-' + fmt(o.todayRedeemed), 'お会計の割引に利用', 'var(--blue)', 'var(--blue-soft)') +
       '</div>' +
       '<div class="card chartcard">' +
-      '<div class="chart-head"><h3>近 7 日 · 积分发放 vs 核销</h3>' +
-      '<div class="legend"><span class="lg"><span class="sw" style="background:var(--brand)"></span>发放</span><span class="lg"><span class="sw" style="background:var(--blue)"></span>核销</span></div>' +
+      '<div class="chart-head"><h3>直近7日間 · ポイント付与 vs 利用</h3>' +
+      '<div class="legend"><span class="lg"><span class="sw" style="background:var(--brand)"></span>付与</span><span class="lg"><span class="sw" style="background:var(--blue)"></span>利用</span></div>' +
       '</div>' +
       '<div class="chartarea" id="chartarea" data-series=\'' + JSON.stringify(series).replace(/'/g, '&#39;') + '\'>' + svgChart + '<div class="bartip" id="bartip"></div></div>' +
       '</div>' +
-      '<div class="card liab"><div class="ic">' + svg('wallet') + '</div><div><div class="val num">' + fmt(o.totalLiability) + ' 元</div><div class="lbl">全体会员未核销积分・折现估值（积分负债）</div></div></div>' +
+      '<div class="card liab"><div class="ic">' + svg('wallet') + '</div><div><div class="val num">' + fmt(o.totalLiability) + ' 円</div><div class="lbl">全会員の未利用ポイント・円換算評価額（ポイント負債）</div></div></div>' +
       '</div>';
   }
 
@@ -849,13 +1145,13 @@
     var rows = list.map(function (m) {
       return '<tr><td class="name">' + esc(m.displayName) + '</td><td>' + esc(m.phone || '—') + '</td><td>' + esc(String(m.joinedAt).slice(0, 10)) + '</td>' +
         '<td class="num" style="color:var(--gold-ink);font-weight:700;">' + fmt(m.points) + '</td>' +
-        '<td class="num">' + fmt(m.totalSpent) + ' 元</td>' +
-        '<td>' + (m.lastCheckinDate ? esc(m.lastCheckinDate) : '<span class="pill neutral">尚未签到</span>') + '</td></tr>';
+        '<td class="num">' + fmt(m.totalSpent) + ' 円</td>' +
+        '<td>' + (m.lastCheckinDate ? esc(m.lastCheckinDate) : '<span class="pill neutral">チェックインなし</span>') + '</td></tr>';
     }).join('');
     return '<div class="card padcard stack">' +
-      '<div class="searchbar">' + svg('search') + '<input class="input" id="adminsearch" placeholder="搜寻姓名或电话" value="' + esc(q) + '"></div>' +
-      '<div class="tablewrap"><table class="logtable"><thead><tr><th>会员</th><th>电话</th><th>加入日期</th><th>目前积分</th><th>累计消费</th><th>最近到店</th></tr></thead><tbody>' +
-      (rows || '<tr><td colspan="6"><div class="empty">' + svg('search') + '<div>找不到符合的会员</div></div></td></tr>') +
+      '<div class="searchbar">' + svg('search') + '<input class="input" id="adminsearch" placeholder="氏名または電話番号で検索" value="' + esc(q) + '"></div>' +
+      '<div class="tablewrap"><table class="logtable"><thead><tr><th>会員</th><th>電話番号</th><th>登録日</th><th>現在のポイント</th><th>累計ご利用額</th><th>最終チェックイン</th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="6"><div class="empty">' + svg('search') + '<div>該当する会員が見つかりません</div></div></td></tr>') +
       '</tbody></table></div>' +
       '</div>';
   }
@@ -864,14 +1160,18 @@
     var r = state.admin.rules;
     if (!r) return loadingBlock();
     return '<div class="card padcard stack">' +
-      '<div><div class="section-title">积分规则设定</div><div class="section-sub">调整后立即套用于顾客端与收银台，无需另外发布。</div></div>' +
+      '<div><div class="section-title">ポイントルール設定</div><div class="section-sub">変更はお客様用画面とレジにすぐ反映されます。別途公開する必要はありません。</div></div>' +
       '<div class="rules-grid">' +
-      ruleItem('earnRate', '消费兑换积分', '每消费', r.earnRate, '元 得 1 积分') +
-      ruleItem('checkinPoints', '到店签到积分', '每次签到获得', r.checkinPoints, '积分') +
-      ruleItem('redeemRate', '积分折现比例', '每', r.redeemRate, '积分 可折抵 1 元') +
-      rangeItem('maxRedeemPercent', '单笔最高折抵比例', r.maxRedeemPercent, '%（订单金额）', 0, 100) +
+      ruleItem('earnRate', 'ご利用ポイント付与', 'ご利用', r.earnRate, '円ごとに 1 ポイント') +
+      ruleItem('checkinPoints', '毎日チェックインポイント', '1日のチェックインで', r.checkinPoints, 'ポイント') +
+      ruleItem('streak5Bonus', '連続チェックイン 5 日ボーナス', '5 日目に追加', r.streak5Bonus, 'ポイント') +
+      ruleItem('streak10Bonus', '連続チェックイン 10 日ボーナス', '10 日目に追加', r.streak10Bonus, 'ポイント（付与後リセット）') +
+      ruleItem('inviterBonus', '紹介ボーナス（紹介した方）', 'お友達の登録成功で紹介した方に', r.inviterBonus, 'ポイント') +
+      ruleItem('inviteeBonus', '紹介ボーナス（新規会員）', '招待コードで登録した新規会員に', r.inviteeBonus, 'ポイント（別途 新規入会ボーナスあり）') +
+      ruleItem('redeemRate', 'ポイント換算レート', '', r.redeemRate, 'ポイント = 1 円分') +
+      rangeItem('maxRedeemPercent', '1回の利用上限', r.maxRedeemPercent, '%（お会計金額）', 0, 100) +
       '</div>' +
-      rangeItem('codeTTL', '店员签到码有效期', r.codeTTL, '秒后自动更新', 20, 180) +
+      '<div class="section-sub" style="margin:0;">チェックインのルール：お客様が1日1回スマホでチェックインします。連続 5 日目・10 日目は追加ポイントがあり、10 日目の付与後は1日目からやり直しです。1日でも休むとやり直しになります。ボーナスを 0 にすると、その段階のボーナスは無効になります。</div>' +
       '<div class="autosave" id="autosaveMsg">' + (state.admin.autosaveMsg ? svg('check') + ' ' + esc(state.admin.autosaveMsg) : '') + '</div>' +
       '</div>';
   }
@@ -884,19 +1184,19 @@
 
   function renderAdminLedger() {
     var filter = state.admin.ledgerFilter;
-    var chips = [['all', '全部'], ['checkin', '签到'], ['purchase', '消费']];
+    var chips = [['all', 'すべて'], ['checkin', 'チェックイン'], ['bonus', 'ボーナス'], ['purchase', 'ご利用']];
     var rows = state.admin.ledger.map(function (t) {
       var net = (t.earnedPoints || 0) - (t.redeemedPoints || 0);
       return '<tr><td>' + fmtDateTime(t.ts) + '</td><td class="name">' + esc(t.memberName) + '</td>' +
-        '<td>' + (t.type === 'checkin' ? '<span class="pill good">签到</span>' : (t.redeemedPoints > 0 ? '<span class="pill blue">消费+折抵</span>' : '<span class="pill neutral">消费</span>')) + '</td>' +
-        '<td class="num">' + (t.type === 'purchase' ? fmt(t.paidAmount) + ' 元' : '—') + '</td>' +
+        '<td>' + (t.type === 'checkin' ? '<span class="pill good">チェックイン</span>' : (t.type === 'bonus' ? '<span class="pill gold">ボーナス</span>' : t.redeemedPoints > 0 ? '<span class="pill blue">ご利用+ポイント利用</span>' : '<span class="pill neutral">ご利用</span>')) + '</td>' +
+        '<td class="num">' + (t.type === 'purchase' ? fmt(t.paidAmount) + ' 円' : '—') + '</td>' +
         '<td class="num delta ' + (net >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(net) + '</td>' +
         '<td>' + esc(t.note || '—') + '</td></tr>';
     }).join('');
     return '<div class="card padcard stack">' +
       '<div class="filterchips">' + chips.map(function (c) { return '<button data-filter="' + c[0] + '" class="' + (filter === c[0] ? 'active' : '') + '">' + c[1] + '</button>'; }).join('') + '</div>' +
-      '<div class="tablewrap"><table class="logtable"><thead><tr><th>时间</th><th>会员</th><th>类型</th><th>金额</th><th>积分变动</th><th>备注</th></tr></thead><tbody>' +
-      (rows || '<tr><td colspan="6"><div class="empty">' + svg('list') + '<div>没有符合的纪录</div></div></td></tr>') +
+      '<div class="tablewrap"><table class="logtable"><thead><tr><th>日時</th><th>会員</th><th>種別</th><th>金額</th><th>ポイント増減</th><th>備考</th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="6"><div class="empty">' + svg('list') + '<div>該当する記録はありません</div></div></td></tr>') +
       '</tbody></table></div>' +
       '</div>';
   }
@@ -905,22 +1205,22 @@
     var f = state.admin.newStaffForm;
     var rows = state.admin.staffList.map(function (u) {
       return '<div class="staff-acct-row"><div class="av2">' + esc(initials(u.name)) + '</div>' +
-        '<div class="info"><b>' + esc(u.name) + '</b><span>@' + esc(u.username) + ' · ' + (u.role === 'admin' ? '管理员' : '店员') + '</span></div>' +
-        (u.id === state.session.staff.id ? '' : '<button class="del" data-act="delstaff" data-id="' + u.id + '" title="删除帐号">' + svg('trash') + '</button>') +
+        '<div class="info"><b>' + esc(u.name) + '</b><span>@' + esc(u.username) + ' · ' + (u.role === 'admin' ? '管理者' : 'スタッフ') + '</span></div>' +
+        (u.id === state.session.staff.id ? '' : '<button class="del" data-act="delstaff" data-id="' + u.id + '" title="アカウントを削除">' + svg('trash') + '</button>') +
         '</div>';
     }).join('');
     return '<div class="card padcard stack">' +
-      '<div><div class="section-title">员工帐号</div><div class="section-sub">管理可以登入收银台 / 后台的帐号。「管理员」可以进入后台，「店员」只能使用收银台。</div></div>' +
-      '<div class="stack" style="gap:8px;">' + (rows || '<div class="empty">' + svg('users') + '<div>还没有其他帐号</div></div>') + '</div>' +
+      '<div><div class="section-title">スタッフアカウント</div><div class="section-sub">レジ / 管理画面にログインできるアカウントを管理します。「管理者」は管理画面に入れ、「スタッフ」はレジのみ利用できます。</div></div>' +
+      '<div class="stack" style="gap:8px;">' + (rows || '<div class="empty">' + svg('users') + '<div>他のアカウントはまだありません</div></div>') + '</div>' +
       '<hr class="divider">' +
-      '<div class="section-title" style="font-size:13.5px;">新增帐号</div>' +
+      '<div class="section-title" style="font-size:13.5px;">アカウント追加</div>' +
       '<div class="new-staff-form">' +
-      '<div class="field"><label>帐号</label><input class="input" id="newu" value="' + esc(f.username) + '"></div>' +
-      '<div class="field"><label>密码</label><input class="input" id="newp" type="password" value="' + esc(f.password) + '"></div>' +
-      '<div class="field"><label>姓名</label><input class="input" id="newn" value="' + esc(f.name) + '"></div>' +
-      '<div class="field"><label>角色</label><select class="select" id="newr"><option value="staff" ' + (f.role === 'staff' ? 'selected' : '') + '>店员</option><option value="admin" ' + (f.role === 'admin' ? 'selected' : '') + '>管理员</option></select></div>' +
+      '<div class="field"><label>アカウント</label><input class="input" id="newu" value="' + esc(f.username) + '"></div>' +
+      '<div class="field"><label>パスワード</label><input class="input" id="newp" type="password" value="' + esc(f.password) + '"></div>' +
+      '<div class="field"><label>氏名</label><input class="input" id="newn" value="' + esc(f.name) + '"></div>' +
+      '<div class="field"><label>権限</label><select class="select" id="newr"><option value="staff" ' + (f.role === 'staff' ? 'selected' : '') + '>スタッフ</option><option value="admin" ' + (f.role === 'admin' ? 'selected' : '') + '>管理者</option></select></div>' +
       '</div>' +
-      '<button class="btn primary sm" data-act="createstaff" style="align-self:flex-start;">' + svg('key') + ' 新增帐号</button>' +
+      '<button class="btn primary sm" data-act="createstaff" style="align-self:flex-start;">' + svg('key') + ' アカウントを追加</button>' +
       '</div>';
   }
 
@@ -958,9 +1258,9 @@
         try {
           var patch = {}; patch[key] = v;
           state.admin.rules = await api('PUT', '/api/admin/rules', patch);
-          state.admin.autosaveMsg = '变更已自动储存';
+          state.admin.autosaveMsg = '変更を自動保存しました';
           var msgEl = document.getElementById('autosaveMsg');
-          if (msgEl) msgEl.innerHTML = svg('check') + ' 变更已自动储存';
+          if (msgEl) msgEl.innerHTML = svg('check') + ' 変更を自動保存しました';
         } catch (e) { toast(e.message, 'err'); }
       }, 450));
     });
@@ -977,7 +1277,7 @@
       function showTip(g) {
         var idx = parseInt(g.getAttribute('data-idx'), 10);
         var s = series[idx];
-        tip.innerHTML = '<b>' + s.date + '</b><br>发放 +' + fmt(s.issued) + ' · 核销 -' + fmt(s.redeemed);
+        tip.innerHTML = '<b>' + s.date + '</b><br>付与 +' + fmt(s.issued) + ' · 利用 -' + fmt(s.redeemed);
         tip.classList.add('show');
       }
       function positionTip(e) {
@@ -999,7 +1299,7 @@
       createBtn.addEventListener('click', async function () {
         try {
           await api('POST', '/api/admin/staff', f);
-          toast('已新增帐号「' + f.username + '」');
+          toast('アカウント「' + f.username + '」を追加しました');
           state.admin.newStaffForm = { username: '', password: '', name: '', role: 'staff' };
           state.admin.staffList = await api('GET', '/api/admin/staff');
           render();
@@ -1009,7 +1309,7 @@
     app.querySelectorAll('[data-act="delstaff"]').forEach(function (b) {
       b.addEventListener('click', async function () {
         var id = b.getAttribute('data-id');
-        if (!confirm('确定要删除这个帐号吗？此操作无法复原。')) return;
+        if (!confirm('このアカウントを削除しますか？この操作は取り消せません。')) return;
         try {
           await api('DELETE', '/api/admin/staff/' + id);
           state.admin.staffList = await api('GET', '/api/admin/staff');

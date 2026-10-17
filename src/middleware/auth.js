@@ -26,15 +26,15 @@ function attachIdentity(req, res, next) {
 }
 
 function requireMember(req, res, next) {
-  if (!req.member) return next(new HttpError(401, '请先使用 LINE 帐号登入'));
+  if (!req.member) return next(new HttpError(401, 'LINEアカウントでログインしてください'));
   next();
 }
 
 function requireStaff(minRole) {
   return function (req, res, next) {
-    if (!req.staff) return next(new HttpError(401, '请先登入店员 / 管理员帐号'));
+    if (!req.staff) return next(new HttpError(401, 'スタッフ / 管理者アカウントでログインしてください'));
     if (minRole === 'admin' && req.staff.role !== 'admin') {
-      return next(new HttpError(403, '此帐号没有后台管理权限'));
+      return next(new HttpError(403, 'このアカウントには管理画面の権限がありません'));
     }
     next();
   };

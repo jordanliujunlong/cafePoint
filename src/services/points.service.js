@@ -11,7 +11,7 @@ async function getRules() {
 }
 
 async function updateRules(patch) {
-  const allowed = ['earnRate', 'checkinPoints', 'redeemRate', 'maxRedeemPercent', 'codeTTL'];
+  const allowed = ['earnRate', 'checkinPoints', 'streak5Bonus', 'streak10Bonus', 'redeemRate', 'maxRedeemPercent', 'inviterBonus', 'inviteeBonus'];
   const data = {};
   for (const key of allowed) {
     if (patch[key] !== undefined) {

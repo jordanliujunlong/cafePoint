@@ -24,8 +24,8 @@ async function overview(req, res) {
     const dayTx = rows.filter((t) => dateKeyInTz(t.ts) === dKey);
     const issued = dayTx.reduce((s, t) => s + (t.earnedPoints || 0), 0);
     const redeemed = dayTx.reduce((s, t) => s + (t.redeemedPoints || 0), 0);
-    const wd = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
-    return { date: dKey, label: `周${wd}`, issued, redeemed };
+    const wd = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
+    return { date: dKey, label: wd, issued, redeemed };
   });
 
   const memberCount = await prisma.member.count();
@@ -93,11 +93,11 @@ async function listStaff(req, res) {
 async function createStaff(req, res) {
   const { username, password, name, role } = req.body || {};
   if (!username || !password || !name || !['staff', 'admin'].includes(role)) {
-    throw new HttpError(400, '请填写完整的帐号、密码、姓名，并选择角色（staff 或 admin）');
+    throw new HttpError(400, 'アカウント・パスワード・氏名をすべて入力し、権限（staff または admin）を選択してください');
   }
-  if (password.length < 6) throw new HttpError(400, '密码至少需要 6 个字符');
+  if (password.length < 6) throw new HttpError(400, 'パスワードは6文字以上で入力してください');
   const existing = await prisma.staffUser.findUnique({ where: { username } });
-  if (existing) throw new HttpError(409, '此帐号已经存在');
+  if (existing) throw new HttpError(409, 'このアカウントはすでに登録されています');
   const passwordHash = await bcrypt.hash(password, 10);
   const user = await prisma.staffUser.create({ data: { username, passwordHash, name, role } });
   res.status(201).json({ id: user.id, username: user.username, name: user.name, role: user.role });
@@ -105,9 +105,9 @@ async function createStaff(req, res) {
 
 async function deleteStaff(req, res) {
   const { id } = req.params;
-  if (id === req.staff.id) throw new HttpError(400, '不能删除自己目前登入的帐号');
+  if (id === req.staff.id) throw new HttpError(400, '現在ログイン中のアカウントは削除できません');
   await prisma.staffUser.delete({ where: { id } }).catch(() => {
-    throw new HttpError(404, '找不到这个帐号');
+    throw new HttpError(404, 'アカウントが見つかりません');
   });
   res.json({ ok: true });
 }

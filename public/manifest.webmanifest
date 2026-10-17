@@ -1,6 +1,7 @@
 {
-  "name": "本町咖啡 · 积分通",
-  "short_name": "积分通",
+  "name": "本町珈琲 · ポイント通",
+  "short_name": "ポイント通",
+  "lang": "ja",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F7F5F0",

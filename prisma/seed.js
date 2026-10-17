@@ -16,16 +16,9 @@ async function main() {
   });
   console.log('积分规则已就绪：', rule);
 
-  const code = await prisma.checkinCode.upsert({
-    where: { id: 'singleton' },
-    update: {},
-    create: { id: 'singleton', code: String(Math.floor(100000 + Math.random() * 900000)) }
-  });
-  console.log('签到码已初始化：', code.code);
-
   const username = process.env.SEED_ADMIN_USERNAME || 'admin';
   const password = process.env.SEED_ADMIN_PASSWORD || 'benmachi2026';
-  const name = process.env.SEED_ADMIN_NAME || '店长';
+  const name = process.env.SEED_ADMIN_NAME || '店長';
 
   const existing = await prisma.staffUser.findUnique({ where: { username } });
   if (existing) {

@@ -3,8 +3,10 @@
 //  - Member      顾客会员（以 LINE 帐号登入）
 //  - StaffUser   店员 / 管理员帐号（帐号密码登入）
 //  - Rule        积分规则（单例表，只会有一行 id = "singleton"）
-//  - CheckinCode 店员端目前有效的到店签到码（单例表）
-//  - Transaction 所有积分变动纪录（签到 / 消费 / 新会员礼）
+//  - CheckinCode （已停用）旧版店员动态签到码；改为顾客每日自助签到后不再使用，
+//                保留此表只是为了避免 prisma db push 时出现「删除数据表」的警告
+//  - InviteCode  每次消费后产生给顾客的一次性邀请码（只能邀请新会员，成功后双方都拿积分）
+//  - Transaction 所有积分变动纪录（签到 / 消费 / 新会员礼 / 连续签到奖励 / 邀请奖励）
 
 datasource db {
   provider = "postgresql"
@@ -24,8 +26,11 @@ model Member {
   points          Int           @default(0)
   totalSpent      Float         @default(0)
   lastCheckinDate String? // 门店当地时区的 YYYY-MM-DD，用来判断「今日是否已签到」
+  checkinStreak   Int           @default(0) // 目前连续签到天数（1~10；第 10 天领完奖励后，隔天从 1 重新开始）
   joinedAt        DateTime      @default(now())
   transactions    Transaction[]
+  invitesCreated  InviteCode[]  @relation("Inviter")
+  invitedBy       InviteCode?   @relation("Invitee")
 
   @@index([displayName])
 }
@@ -43,10 +48,14 @@ model StaffUser {
 model Rule {
   id               String   @id @default("singleton")
   earnRate         Int      @default(10) // 每消费 N 元 得 1 积分
-  checkinPoints    Int      @default(5) // 每次到店签到获得的积分
+  checkinPoints    Int      @default(5) // 每日签到获得的基本积分
+  streak5Bonus     Int      @default(5) // 连续签到满 5 天，当天额外奖励的积分
+  streak10Bonus    Int      @default(10) // 连续签到满 10 天，当天额外奖励的积分（领完后重置）
   redeemRate       Int      @default(10) // 每 N 积分 折抵 1 元
   maxRedeemPercent Int      @default(50) // 单笔最高折抵订单金额的百分比
-  codeTTL          Int      @default(60) // 店员签到码有效秒数
+  inviterBonus     Int      @default(100) // 邀请码被新会员成功使用时，邀请人获得的积分
+  inviteeBonus     Int      @default(200) // 新会员用邀请码成功加入时，自己获得的积分（另外还有新会员礼）
+  codeTTL          Int      @default(60) // （已停用）旧版签到码有效秒数
   updatedAt        DateTime @updatedAt
 }
 
@@ -56,11 +65,25 @@ model CheckinCode {
   generatedAt DateTime @default(now())
 }
 
+model InviteCode {
+  id         String    @id @default(cuid())
+  code       String    @unique // 8 位大写英数字（不含容易看错的 0 O 1 I），显示时写成 XXXX-XXXX
+  inviterId  String
+  inviter    Member    @relation("Inviter", fields: [inviterId], references: [id])
+  sourceTxId String? // 是哪一笔消费产生的
+  createdAt  DateTime  @default(now())
+  usedById   String?   @unique // 谁用了这组码（一个人只能被邀请一次、一组码只能用一次）
+  usedBy     Member?   @relation("Invitee", fields: [usedById], references: [id])
+  usedAt     DateTime?
+
+  @@index([inviterId])
+}
+
 model Transaction {
   id             String   @id @default(cuid())
   memberId       String
   member         Member   @relation(fields: [memberId], references: [id])
-  type           String // "checkin" | "purchase" | "bonus"
+  type           String // "checkin" | "purchase" | "bonus"（新会员礼 / 连续签到奖励）
   ts             DateTime @default(now())
   orderAmount    Float?
   discount       Float?

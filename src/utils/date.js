@@ -21,4 +21,12 @@ function daysAgoDate(n) {
   return d;
 }
 
-module.exports = { dateKeyInTz, todayKey, daysAgoDate };
+// 给定 YYYY-MM-DD，回传前一天的 YYYY-MM-DD（纯日期运算，不受时区 / 夏令时间影响）。
+function prevDayKey(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  return dt.toISOString().slice(0, 10);
+}
+
+module.exports = { dateKeyInTz, todayKey, daysAgoDate, prevDayKey };

@@ -11,8 +11,17 @@ const loginLimiter = rateLimit({
   limit: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: '登入尝试太多次，请稍后再试' }
+  message: { error: 'ログインの試行回数が多すぎます。しばらくしてからもう一度お試しください' }
 });
+
+const inviteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: '確認の回数が多すぎます。しばらくしてからもう一度お試しください' }
+});
+router.get('/invite/check', inviteLimiter, asyncHandler(ctrl.inviteCheck));
 
 router.get('/line/login', asyncHandler(ctrl.lineLoginStart));
 router.get('/line/callback', asyncHandler(ctrl.lineLoginCallback));

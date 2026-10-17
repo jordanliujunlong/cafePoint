@@ -2,29 +2,9 @@ const prisma = require('../db');
 const HttpError = require('../utils/HttpError');
 const { todayKey, daysAgoDate, dateKeyInTz } = require('../utils/date');
 const pointsService = require('../services/points.service');
-const codeService = require('../services/code.service');
-
-async function getCode(req, res) {
-  const active = await codeService.getActiveCode();
-  const todayCheckins = await countTodayCheckins();
-  res.json({ code: active.code, secondsRemaining: active.secondsRemaining, todayCheckins });
-}
-
-async function regenerateCode(req, res) {
-  const row = await codeService.regenerateCode();
-  const rules = await pointsService.getRules();
-  res.json({ code: row.code, secondsRemaining: rules.codeTTL });
-}
-
-async function countTodayCheckins() {
-  const since = daysAgoDate(1);
-  const recent = await prisma.transaction.findMany({
-    where: { type: 'checkin', ts: { gte: since } },
-    select: { ts: true }
-  });
-  const key = todayKey();
-  return recent.filter((t) => dateKeyInTz(t.ts) === key).length;
-}
+const jwtUtil = require('../utils/jwt');
+const inviteService = require('../services/invite.service');
+const config = require('../config');
 
 async function listMembers(req, res) {
   const q = (req.query.q || '').trim();
@@ -47,14 +27,33 @@ async function listMembers(req, res) {
   );
 }
 
+// 店员扫描会员二维码（相机、扫码枪或手动贴上内容都走这支）。
+async function scan(req, res) {
+  const memberId = jwtUtil.verifyMemberQr(req.body && req.body.code);
+  if (!memberId) {
+    throw new HttpError(400, 'QRコードが無効か、有効期限が切れています。お客様に「会員コード」画面を開き直してもらい、もう一度読み取ってください');
+  }
+  const member = await prisma.member.findUnique({ where: { id: memberId } });
+  if (!member) throw new HttpError(404, '会員が見つかりません');
+  res.json({
+    member: {
+      id: member.id,
+      displayName: member.displayName,
+      pictureUrl: member.pictureUrl,
+      phone: member.phone,
+      points: member.points
+    }
+  });
+}
+
 async function checkout(req, res) {
   const { memberId, orderAmount, redeemPoints } = req.body || {};
   const amount = Number(orderAmount);
   if (!memberId || !Number.isFinite(amount) || amount <= 0) {
-    throw new HttpError(400, '请选择会员并输入有效的订单金额');
+    throw new HttpError(400, '会員を選択し、正しいご利用金額を入力してください');
   }
   const member = await prisma.member.findUnique({ where: { id: memberId } });
-  if (!member) throw new HttpError(404, '找不到这位会员');
+  if (!member) throw new HttpError(404, '会員が見つかりません');
 
   const rules = await pointsService.getRules();
   const maxUse = pointsService.maxUsablePoints(amount, member.points, rules);
@@ -63,15 +62,16 @@ async function checkout(req, res) {
   const paidAmount = Math.max(0, amount - discount);
   const earnedPoints = pointsService.earnFromAmount(paidAmount, rules);
 
-  const [updatedMember, tx] = await prisma.$transaction([
-    prisma.member.update({
+  // 扣积分 / 记账 / 产生邀请码要一起成功，或一起失败。
+  const { updatedMember, tx, invite } = await prisma.$transaction(async (db) => {
+    const updatedMember = await db.member.update({
       where: { id: member.id },
       data: {
         points: { increment: earnedPoints - useRedeem },
         totalSpent: { increment: paidAmount }
       }
-    }),
-    prisma.transaction.create({
+    });
+    const tx = await db.transaction.create({
       data: {
         memberId: member.id,
         type: 'purchase',
@@ -83,8 +83,11 @@ async function checkout(req, res) {
         note: (req.body && req.body.note) || '',
         staffUserId: req.staff.id
       }
-    })
-  ]);
+    });
+    // 每次消费，给这位顾客一组一次性邀请码
+    const invite = await inviteService.issueInviteCode(db, member.id, tx.id);
+    return { updatedMember, tx, invite };
+  });
 
   res.json({
     member: { id: updatedMember.id, displayName: updatedMember.displayName, points: updatedMember.points },
@@ -95,7 +98,9 @@ async function checkout(req, res) {
       redeemedPoints: useRedeem,
       paidAmount,
       earnedPoints
-    }
+    },
+    inviteCode: inviteService.formatCode(invite.code),
+    inviteShareUrl: `${config.appBaseUrl}/?invite=${invite.code}`
   });
 }
 
@@ -129,4 +134,4 @@ async function todayLog(req, res) {
   });
 }
 
-module.exports = { getCode, regenerateCode, listMembers, checkout, todayLog };
+module.exports = { listMembers, scan, checkout, todayLog };

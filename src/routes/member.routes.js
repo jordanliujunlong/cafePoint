@@ -12,11 +12,13 @@ const checkinLimiter = rateLimit({
   limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: '尝试次数太多，请稍等一下再试' }
+  message: { error: '試行回数が多すぎます。しばらくしてからもう一度お試しください' }
 });
 
 router.get('/summary', asyncHandler(ctrl.summary));
 router.get('/transactions', asyncHandler(ctrl.transactions));
+router.get('/qr', asyncHandler(ctrl.qr));
+router.get('/invites', asyncHandler(ctrl.invites));
 router.post('/checkin', checkinLimiter, asyncHandler(ctrl.checkin));
 
 module.exports = router;
