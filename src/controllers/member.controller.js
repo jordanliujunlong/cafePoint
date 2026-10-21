@@ -43,7 +43,8 @@ async function summary(req, res) {
       streak5Bonus: rules.streak5Bonus,
       streak10Bonus: rules.streak10Bonus,
       inviterBonus: rules.inviterBonus,
-      inviteeBonus: rules.inviteeBonus
+      inviteeBonus: rules.inviteeBonus,
+      redeemRate: rules.redeemRate
     }
   });
 }
@@ -162,6 +163,7 @@ async function invites(req, res) {
   res.json({
     inviterBonus: rules.inviterBonus,
     inviteeBonus: rules.inviteeBonus,
+    redeemRate: rules.redeemRate,
     codes: rows.map((r) => ({
       code: inviteService.formatCode(r.code),
       shareUrl: `${config.appBaseUrl}/?invite=${r.code}`,

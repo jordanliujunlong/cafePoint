@@ -11,6 +11,10 @@
     n = Math.round(Number(n) || 0);
     return n.toLocaleString('ja-JP');
   }
+  // ポイント → 円換算（お会計で使える金額）
+  function yenOf(points, redeemRate) {
+    return Math.floor((Number(points) || 0) / (Number(redeemRate) || 10));
+  }
   function fmtSigned(n) {
     n = Math.round(Number(n) || 0);
     return (n > 0 ? '+' : '') + fmt(n);
@@ -383,12 +387,12 @@
           streakCardHtml(s, c) +
           '<button class="invite-card" data-act="goinvites">' +
           '<div class="ic">' + svg('gift') + '</div>' +
-          '<div class="tx"><b>お友達紹介</b><span>' + (s.unusedInvites ? 'お渡しできる招待コードが ' + s.unusedInvites + ' 件あります' : 'ご利用後にスタッフが招待コードをお渡しします') + ' · 紹介成功で +' + s.rules.inviterBonus + ' ポイント</span></div>' +
+          '<div class="tx"><b>お友達紹介</b>' +
+          '<div class="ic-rewards"><span class="rw-pill">あなた <b class="num">' + fmt(yenOf(s.rules.inviterBonus, s.rules.redeemRate)) + '円分</b></span>' +
+          '<span class="rw-pill">お友達 <b class="num">' + fmt(yenOf(s.rules.inviteeBonus, s.rules.redeemRate)) + '円分</b></span></div>' +
+          '<span>' + (s.unusedInvites ? 'お渡しできる招待コードが ' + s.unusedInvites + ' 件あります' : 'ご利用後にスタッフが招待コードをお渡しします') + '</span></div>' +
           svg('chevronRight', 'chev') + '</button>' +
-          '<div class="stat2">' +
-          '<div class="tile"><div class="t">累計ご利用額</div><div class="v num">' + fmt(s.totalSpent) + ' 円</div></div>' +
-          '<div class="tile"><div class="t">今月の獲得ポイント</div><div class="v num">' + fmt(s.monthEarned) + ' ポイント</div></div>' +
-          '</div>' +
+          '<div class="stat1"><div class="t">今月の獲得ポイント</div><div class="v num">' + fmt(s.monthEarned) + ' ポイント</div></div>' +
           '<div>' +
           '<div class="sec-head"><h4>最近の履歴</h4><a data-act="gohistory">すべて見る ' + svg('chevronRight') + '</a></div>' +
           (recent.length ? '<div>' + recent.map(txRowHtml).join('') + '</div>' : '<div class="empty">' + svg('list') + '<div>ご利用・チェックインの履歴はまだありません</div></div>') +
@@ -413,9 +417,18 @@
             '<div class="inv-btns"><button class="btn ghost sm" data-act="copycode" data-i="' + idx + '">コードをコピー</button>' +
             '<button class="btn primary sm" data-act="copylink" data-i="' + idx + '">リンクをコピー</button></div></div>';
       }).join('');
+      var rewardTile = function (who, pts) {
+        return '<div class="rw-tile"><div class="rw-who">' + who + '</div>' +
+          '<div class="rw-yen num">' + fmt(yenOf(pts, iv.redeemRate)) + '<span>円分</span></div>' +
+          '<div class="rw-pts num">' + fmt(pts) + ' ポイント</div></div>';
+      };
       body =
+        (iv ? '<div class="invite-reward">' +
+          '<div class="rw-head">' + svg('gift') + '<b>紹介が成立すると、ふたりともうれしい！</b></div>' +
+          '<div class="rw-grid">' + rewardTile('あなたに', iv.inviterBonus) + '<div class="rw-plus">＋</div>' + rewardTile('お友達に', iv.inviteeBonus) + '</div>' +
+          '</div>' : '') +
         '<div class="invite-intro"><b>ご利用のたびに、スタッフが招待コードをお渡しします</b>' +
-        '<p>お友達が初めて LINE で登録するときに入力（またはあなたの招待リンクを開く）すると、あなたに <b class="num">' + (iv ? iv.inviterBonus : 100) + '</b> ポイント、お友達に <b class="num">' + (iv ? iv.inviteeBonus : 200) + '</b> ポイントが付与されます。コードは1回のみ有効で、ご自身では使えません。</p></div>' +
+        '<p>お友達が初めて LINE で登録するときにコードを入力（またはあなたの招待リンクを開く）すると、上記のポイントがお互いに付与されます。コードは1回のみ有効で、ご自身では使えません。</p></div>' +
         '<div class="inv-list">' + listHtml + '</div>';
     } else if (scr === 'qr') {
       header = custHeader('会員コード', { back: true });
