@@ -466,6 +466,10 @@
   .points-hero{position:relative;}
   .points-hero .qr-btn{position:absolute; top:14px; right:14px; display:flex; align-items:center; gap:5px; border:1px solid var(--border-strong); background:var(--surface); color:var(--ink); border-radius:999px; padding:7px 12px; font-size:12px; font-weight:700;}
   .points-hero .qr-btn svg{width:15px; height:15px;}
+  .points-hero .refresh-btn{display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; margin-left:4px; border:1px solid var(--border-strong); background:var(--surface); color:var(--ink); border-radius:999px; padding:0; vertical-align:middle;}
+  .points-hero .refresh-btn svg{width:14px; height:14px;}
+  .points-hero .refresh-btn.spinning svg{animation:refresh-spin .8s linear infinite;}
+  @keyframes refresh-spin{to{transform:rotate(360deg);}}
   .qr-screen{display:flex; flex-direction:column; align-items:center; gap:12px; padding-top:8px; text-align:center;}
   .qr-card{background:#fff; border-radius:20px; padding:16px; width:min(100%, 300px); aspect-ratio:1/1; display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow);}
   .qrbox{width:100%; height:100%;}

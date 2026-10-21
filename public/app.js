@@ -255,6 +255,24 @@
     render();
   }
 
+  // 画面をローディング表示に切り替えずに最新のポイント・履歴を再取得
+  async function refreshCustomerHome() {
+    var c = state.customer;
+    if (c.refreshing) return;
+    c.refreshing = true;
+    render();
+    try {
+      var res = await Promise.all([api('GET', '/api/me/summary'), api('GET', '/api/me/transactions')]);
+      c.summary = res[0];
+      c.transactions = res[1];
+      toast('最新の情報に更新しました', 'ok');
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+    c.refreshing = false;
+    render();
+  }
+
   function copyText(text, okMsg) {
     function fallback() {
       var ta = document.createElement('textarea');
@@ -380,7 +398,8 @@
         body =
           '<div class="points-hero">' +
           '<button class="qr-btn" data-act="goqr">' + svg('qr') + '<span>会員コード</span></button>' +
-          '<div class="lbl">' + svg('star') + ' 利用可能ポイント</div>' +
+          '<div class="lbl">' + svg('star') + ' 利用可能ポイント' +
+          '<button class="refresh-btn' + (c.refreshing ? ' spinning' : '') + '" data-act="refreshhome" aria-label="最新の情報に更新"' + (c.refreshing ? ' disabled' : '') + '>' + svg('refresh') + '</button></div>' +
           '<div class="val num">' + fmt(s.points) + '<span>ポイント</span></div>' +
           '<div class="sub">約 ' + fmt(s.pointsValue) + ' 円分のお会計に利用できます</div>' +
           '</div>' +
@@ -583,6 +602,8 @@
         } else if (act === 'copycode' || act === 'copylink') {
           var kk = c.invites && c.invites.codes[parseInt(el.getAttribute('data-i'), 10)];
           if (kk) copyText(act === 'copycode' ? kk.code : kk.shareUrl, act === 'copycode' ? '招待コードをコピーしました' : '招待リンクをコピーしました。お友達に送りましょう');
+        } else if (act === 'refreshhome') {
+          refreshCustomerHome();
         } else if (act === 'goqr') {
           c.screen = 'qr';
           render();
