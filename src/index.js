@@ -1,3 +1,4 @@
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const helmet = require('helmet');
@@ -44,10 +45,22 @@ app.use('/api/admin', adminRoutes);
 
 // ---- 静态前端（public/）----
 const publicDir = path.join(__dirname, '..', 'public');
-app.use(express.static(publicDir));
+
+// LINE 内ブラウザなどが古い app.js / styles.css をキャッシュし続けないよう、
+// ファイルの更新時刻をバージョンとして ?v= を付けた index.html を返す（index.html 自体はキャッシュさせない）
+function renderIndexHtml() {
+  const stamp = (f) => fs.statSync(path.join(publicDir, f)).mtimeMs.toString(36).replace('.', '');
+  return fs
+    .readFileSync(path.join(publicDir, 'index.html'), 'utf8')
+    .replace('href="/styles.css"', `href="/styles.css?v=${stamp('styles.css')}"`)
+    .replace('src="/app.js"', `src="/app.js?v=${stamp('app.js')}"`);
+}
+
+app.use(express.static(publicDir, { index: false }));
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
-  res.sendFile(path.join(publicDir, 'index.html'));
+  res.set('Cache-Control', 'no-cache');
+  res.type('html').send(renderIndexHtml());
 });
 
 app.use('/api', notFoundHandler);
