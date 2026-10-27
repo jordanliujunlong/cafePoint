@@ -11,6 +11,7 @@
     n = Math.round(Number(n) || 0);
     return n.toLocaleString('ja-JP');
   }
+  var STAMP_GOAL = 10; // スタンプ何個で無料券1枚（サーバーの stamp.service.js と同じ値）
   // ポイント → 円換算（お会計で使える金額）
   function yenOf(points, redeemRate) {
     return Math.floor((Number(points) || 0) / (Number(redeemRate) || 10));
@@ -125,7 +126,7 @@
     booted: false,
     role: 'customer',
 
-    customer: { screen: 'login', summary: null, transactions: null, loading: false, busy: false, lastCheckin: null, qr: null, qrError: '', loginError: '', inviteInput: '', inviteStatus: null, invites: null },
+    customer: { screen: 'login', summary: null, transactions: null, loading: false, busy: false, lastCheckin: null, qr: null, qrError: '', loginError: '', inviteInput: '', inviteStatus: null, invites: null, friendCode: '', redeemBusy: false },
 
     staffAuth: { form: { username: '', password: '' }, error: '', busy: false },
     staff: {
@@ -136,7 +137,7 @@
       scan: { active: false, error: '', busy: false, input: '' },
       lastInvite: null,
       searchOpen: false,
-      checkoutForm: { orderAmount: '', redeemOn: false, redeemPoints: 0 },
+      checkoutForm: { orderAmount: '', redeemOn: false, redeemPoints: 0, useTicket: false },
       todayLog: null,
       busy: false
     },
@@ -201,7 +202,7 @@
       var ir = params.get('invite_result');
       var bonus = parseInt(params.get('invite_bonus'), 10) || 0;
       inviteNotice = ir === 'ok' ? { msg: '登録完了！紹介ボーナス +' + bonus + ' ポイントを付与しました', kind: 'ok' }
-        : ir === 'existing' ? { msg: 'すでに会員のため、招待コードは新規会員のみ利用できます。このコードは消費されていません', kind: 'err' }
+        : ir === 'already' ? { msg: '招待コードはお一人様1回までです。すでにご利用済みのため、このコードは消費されていません', kind: 'err' }
         : ir === 'used' ? { msg: 'この招待コードはすでに使用されているため、紹介ボーナスはありません', kind: 'err' }
         : ir === 'self' ? { msg: 'ご自身の招待コードは使用できません', kind: 'err' }
         : { msg: '招待コードが無効のため、紹介ボーナスはありません', kind: 'err' };
@@ -379,10 +380,10 @@
         '<div class="login-hero">' +
         '<div class="badge">' + svg('coffee') + '</div>' +
         '<h3>ポイントを貯めはじめましょう</h3>' +
-        '<p>ログイン後は毎日のチェックインやご利用でポイントが貯まり、貯めたポイントはそのままお会計に使えます。</p>' +
+        '<p>ご利用ごとにスタンプが貯まり、' + STAMP_GOAL + '個で次回のお会計が無料に。毎日のチェックインでポイントも貯まり、お会計に使えます。</p>' +
         '</div>' +
         (c.loginError ? '<div class="banner crit">' + svg('alert') + '<span>' + esc(c.loginError) + '</span></div>' : '') +
-        '<div class="invite-box"><label for="invitecode">招待コードをお持ちですか？（任意・新規会員のみ）</label>' +
+        '<div class="invite-box"><label for="invitecode">招待コードをお持ちですか？（任意・お一人様1回まで）</label>' +
         '<input class="input" id="invitecode" autocomplete="off" autocapitalize="characters" maxlength="9" placeholder="例：K7M4-Q9XT" value="' + esc(c.inviteInput) + '">' +
         '<div class="invite-status ' + (c.inviteStatus ? c.inviteStatus.kind : '') + '" id="invitestatus">' + esc(c.inviteStatus ? c.inviteStatus.text : '') + '</div></div>' +
         '<button class="btn line block" data-act="linelogin" style="border:1px solid var(--border);">' + svg('coffee') + ' LINEアカウントで続ける</button>' +
@@ -403,6 +404,7 @@
           '<div class="val num">' + fmt(s.points) + '<span>ポイント</span></div>' +
           '<div class="sub">約 ' + fmt(s.pointsValue) + ' 円分のお会計に利用できます</div>' +
           '</div>' +
+          stampCardHtml(s) +
           streakCardHtml(s, c) +
           '<button class="invite-card" data-act="goinvites">' +
           '<div class="ic">' + svg('gift') + '</div>' +
@@ -431,8 +433,10 @@
       else if (!iv.codes.length) listHtml = '<div class="empty">' + svg('gift') + '<div>招待コードはまだありません。ご利用のたびにスタッフがお渡しします。</div></div>';
       else listHtml = iv.codes.map(function (k, idx) {
         return k.used
-          ? '<div class="inv-row used"><div class="inv-code num">' + esc(k.code) + '</div><div class="inv-meta">' + esc(k.usedByName || '新規会員') + ' さんが使用済み</div></div>'
-          : '<div class="inv-row"><div class="inv-code num">' + esc(k.code) + '</div><div class="inv-meta">利用可能 · 新規会員のみ</div>' +
+          ? '<div class="inv-row used"><div class="inv-code num">' + esc(k.code) + '</div><div class="inv-meta">' + esc(k.usedByName || 'お友達') + ' さんが使用済み</div></div>'
+          : '<div class="inv-row"><div class="inv-code num">' + esc(k.code) + '</div>' +
+            '<div class="inv-gain">（使われると あなた <b class="num">+' + fmt(yenOf(iv.inviterBonus, iv.redeemRate)) + '円分</b>・お友達 <b class="num">+' + fmt(yenOf(iv.inviteeBonus, iv.redeemRate)) + '円分</b>）</div>' +
+            '<div class="inv-meta">利用可能 · ご自身以外の会員ならどなたでも（お一人様1回まで）</div>' +
             '<div class="inv-btns"><button class="btn ghost sm" data-act="copycode" data-i="' + idx + '">コードをコピー</button>' +
             '<button class="btn primary sm" data-act="copylink" data-i="' + idx + '">リンクをコピー</button></div></div>';
       }).join('');
@@ -446,8 +450,14 @@
           '<div class="rw-head">' + svg('gift') + '<b>紹介が成立すると、ふたりともうれしい！</b></div>' +
           '<div class="rw-grid">' + rewardTile('あなたに', iv.inviterBonus) + '<div class="rw-plus">＋</div>' + rewardTile('お友達に', iv.inviteeBonus) + '</div>' +
           '</div>' : '') +
+        (iv && iv.canRedeem
+          ? '<div class="redeem-box"><b>お友達から招待コードをもらいましたか？</b>' +
+            '<span>入力すると あなたに <b class="num">+' + fmt(yenOf(iv.inviteeBonus, iv.redeemRate)) + '円分</b>、お友達に <b class="num">+' + fmt(yenOf(iv.inviterBonus, iv.redeemRate)) + '円分</b>（お一人様1回まで）</span>' +
+            '<div class="redeem-input"><input class="input num" id="friendcode" autocomplete="off" autocapitalize="characters" maxlength="9" placeholder="例：K7M4-Q9XT" value="' + esc(c.friendCode || '') + '">' +
+            '<button class="btn primary sm" data-act="redeemfriend" ' + (c.redeemBusy ? 'disabled' : '') + '>' + (c.redeemBusy ? '処理中…' : '使う') + '</button></div></div>'
+          : '') +
         '<div class="invite-intro"><b>ご利用のたびに、スタッフが招待コードをお渡しします</b>' +
-        '<p>お友達が初めて LINE で登録するときにコードを入力（またはあなたの招待リンクを開く）すると、上記のポイントがお互いに付与されます。コードは1回のみ有効で、ご自身では使えません。</p></div>' +
+        '<p>お友達がコードを入力（またはあなたの招待リンクを開いてログイン）すると、上記のポイントがお互いに付与されます。新規・既存の会員どちらでも使えます。コードは1回のみ有効で、ご自身では使えません。</p></div>' +
         '<div class="inv-list">' + listHtml + '</div>';
     } else if (scr === 'qr') {
       header = custHeader('会員コード', { back: true });
@@ -459,7 +469,7 @@
         '<div class="qr-name"><b>' + esc((c.qr && c.qr.displayName) || sm.displayName || '') + '</b></div>' +
         '<div class="qr-bar"><div id="qrbar"></div></div>' +
         '<div class="qr-cap" id="qrcap"></div>' +
-        '<p class="qr-tip">お会計の際にこの画面をスタッフにスキャンしてもらうと、ポイントの獲得・利用ができます。QRコードは60秒ごとに自動更新されるため、スクリーンショットは長くは使えません。</p>' +
+        '<p class="qr-tip">お会計の際にこの画面をスタッフにスキャンしてもらうと、スタンプの押印・無料券やポイントの利用ができます。QRコードは60秒ごとに自動更新されるため、スクリーンショットは長くは使えません。</p>' +
         '</div>';
     } else if (scr === 'checkinSuccess') {
       header = custHeader('毎日チェックイン', { back: true });
@@ -501,6 +511,28 @@
     return 'あと ' + remain + ' 日連続（' + nm.day + ' 日目）でボーナス +' + nm.points;
   }
 
+  function stampCardHtml(s) {
+    var goal = s.stampGoal || STAMP_GOAL;
+    var n = s.stamps || 0;
+    var cells = '';
+    for (var i = 1; i <= goal; i++) {
+      var on = i <= n;
+      cells += '<div class="stamp-cell' + (on ? ' on' : '') + (i === goal ? ' goal' : '') + '">' +
+        (on ? '<div class="stamp-mark">' + svg('coffee') + '</div>'
+          : (i === goal ? svg('gift') + '<span>FREE</span>' : '<span class="num">' + i + '</span>')) +
+        '</div>';
+    }
+    return '<div class="card stamp-card">' +
+      '<div class="stc-head"><div><b>スタンプカード</b><span>ご利用1回で1個 · ' + goal + '個で次回無料</span></div>' +
+      '<div class="stc-count num">' + n + '<small>/' + goal + '</small></div></div>' +
+      (s.freeTickets
+        ? '<div class="free-ticket">' + svg('ticket') + '<div><b>無料券 ' + s.freeTickets + ' 枚あります！</b><span>次回のお会計が無料になります。お会計時にスタッフへお伝えください</span></div></div>'
+        : '') +
+      '<div class="stamp-grid">' + cells + '</div>' +
+      '<div class="stc-hint">' + svg('zap') + '<span>あと <b class="num">' + (goal - n) + '</b> 個で無料券！</span></div>' +
+      '</div>';
+  }
+
   function streakCardHtml(s, c) {
     var cycle = s.cycleDays || 10;
     var streak = s.streak || 0;
@@ -535,11 +567,20 @@
     var color = isCheckin || isBonus ? 'var(--good)' : 'var(--brand)';
     var title = isCheckin ? (t.note || '毎日チェックイン') : (isBonus ? (t.note || '新規入会ボーナス') : (t.note || 'ご利用'));
     var netPoints = (t.earnedPoints || 0) - (t.redeemedPoints || 0);
-    var amtLine = (t.type === 'purchase') ? ('<small>お支払い ' + fmt(t.paidAmount) + ' 円' + (t.redeemedPoints ? '（ポイント利用 ' + fmt(t.discount) + ' 円）' : '') + '</small>') : '';
+    var bigText = fmtSigned(netPoints);
+    var bigColor = netPoints >= 0 ? 'var(--brand)' : 'var(--blue)';
+    var stampNote = '';
+    if (t.type === 'purchase' && t.freeTicketUsed) {
+      bigText = '無料券'; bigColor = 'var(--gold-ink)';
+    } else if (t.type === 'purchase' && t.stampsAdded) {
+      if (t.redeemedPoints) stampNote = ' · スタンプ +' + t.stampsAdded;
+      else bigText = 'スタンプ +' + t.stampsAdded;
+    }
+    var amtLine = (t.type === 'purchase') ? ('<small>お支払い ' + fmt(t.paidAmount) + ' 円' + (t.redeemedPoints ? '（ポイント利用 ' + fmt(t.discount) + ' 円）' : '') + stampNote + '</small>') : '';
     return '<div class="tx-row">' +
       '<div class="ic" style="background:' + bg + ';color:' + color + '">' + svg(iconName) + '</div>' +
       '<div class="mid"><b>' + esc(title) + '</b><span>' + fmtTime(t.ts) + (t.staffName ? ' · ' + esc(t.staffName) : '') + '</span></div>' +
-      '<div class="amt" style="color:' + (netPoints >= 0 ? 'var(--brand)' : 'var(--blue)') + '">' + fmtSigned(netPoints) + amtLine + '</div>' +
+      '<div class="amt" style="color:' + bigColor + '">' + bigText + amtLine + '</div>' +
       '</div>';
   }
 
@@ -575,6 +616,14 @@
       });
       if (state.customer.inviteInput && !state.customer.inviteStatus) checkInviteDebounced();
     }
+    var friendEl = app.querySelector('#friendcode');
+    if (friendEl) {
+      friendEl.addEventListener('input', function () {
+        var raw = friendEl.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+        friendEl.value = raw.length > 4 ? raw.slice(0, 4) + '-' + raw.slice(4) : raw;
+        state.customer.friendCode = friendEl.value;
+      });
+    }
     app.querySelectorAll('[data-act]').forEach(function (el) {
       el.addEventListener('click', async function () {
         var act = el.getAttribute('data-act');
@@ -602,6 +651,20 @@
         } else if (act === 'copycode' || act === 'copylink') {
           var kk = c.invites && c.invites.codes[parseInt(el.getAttribute('data-i'), 10)];
           if (kk) copyText(act === 'copycode' ? kk.code : kk.shareUrl, act === 'copycode' ? '招待コードをコピーしました' : '招待リンクをコピーしました。お友達に送りましょう');
+        } else if (act === 'redeemfriend') {
+          var fc = (c.friendCode || '').replace(/[^A-Za-z0-9]/g, '');
+          if (fc.length !== 8) { toast('招待コードは英数字8文字です', 'err'); return; }
+          if (c.redeemBusy) return;
+          c.redeemBusy = true; render();
+          try {
+            var rr = await api('POST', '/api/me/invite/redeem', { code: fc });
+            toast('招待コードを使いました！ +' + rr.inviteeBonus + ' ポイントを付与しました');
+            c.friendCode = '';
+            if (c.summary) c.summary.points = rr.points;
+            c.invites = await api('GET', '/api/me/invites');
+          } catch (e) { toast(e.message, 'err'); }
+          c.redeemBusy = false;
+          render();
         } else if (act === 'refreshhome') {
           refreshCustomerHome();
         } else if (act === 'goqr') {
@@ -790,7 +853,7 @@
       var res = await api('POST', '/api/staff/scan', { code: code });
       stopScan();
       state.staff.selectedMember = res.member;
-      state.staff.checkoutForm = { orderAmount: '', redeemOn: false, redeemPoints: 0 };
+      state.staff.checkoutForm = { orderAmount: '', redeemOn: false, redeemPoints: 0, useTicket: false };
       sc.error = ''; sc.input = ''; sc.busy = false;
       toast('会員を認識しました：' + res.member.displayName);
       render();
@@ -847,7 +910,7 @@
         var rows = log.transactions.map(function (t) {
           var net = (t.earnedPoints || 0) - (t.redeemedPoints || 0);
           return '<tr><td>' + fmtTime(t.ts).split(' ')[1] + '</td><td class="name">' + esc(t.memberName) + '</td>' +
-            '<td>' + (t.type === 'checkin' ? '<span class="pill good">チェックイン</span>' : (t.type === 'bonus' ? '<span class="pill gold">ボーナス</span>' : '<span class="pill blue">ご利用</span>')) + '</td>' +
+            '<td>' + (t.type === 'checkin' ? '<span class="pill good">チェックイン</span>' : (t.type === 'bonus' ? '<span class="pill gold">ボーナス</span>' : (t.freeTicketUsed ? '<span class="pill gold">無料券</span>' : '<span class="pill blue">ご利用</span>'))) + '</td>' +
             '<td class="num">' + (t.type === 'purchase' ? fmt(t.paidAmount) + ' 円' : '—') + '</td>' +
             '<td class="num delta ' + (net >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(net) + '</td></tr>';
         }).join('');
@@ -886,17 +949,23 @@
     var rules = state.admin.rules; // 可能尚未载入，先用保守预设值显示
     var redeemRate = rules ? rules.redeemRate : 10;
     var maxRedeemPercent = rules ? rules.maxRedeemPercent : 50;
-    var earnRate = rules ? rules.earnRate : 10;
-    var maxUse = sel ? Math.max(0, Math.min(sel.points, Math.floor((amount * maxRedeemPercent) / 100 * redeemRate))) : 0;
-    var redeemPts = f.redeemOn ? Math.min(f.redeemPoints || 0, maxUse) : 0;
-    var discount = redeemPts / redeemRate;
+    var hasTicket = !!(sel && sel.freeTickets > 0);
+    var useTicket = hasTicket && f.useTicket;
+    var maxUse = sel && !useTicket ? Math.max(0, Math.min(sel.points, Math.floor((amount * maxRedeemPercent) / 100 * redeemRate))) : 0;
+    var redeemPts = f.redeemOn && !useTicket ? Math.min(f.redeemPoints || 0, maxUse) : 0;
+    var discount = useTicket ? amount : redeemPts / redeemRate;
     var payable = Math.max(0, amount - discount);
-    var earn = Math.floor(payable / earnRate);
+    var curStamps = sel ? (sel.stamps || 0) : 0;
+    var stampText = !sel ? '—' : useTicket
+      ? '無料券を使用（スタンプなし）'
+      : (curStamps + 1 >= STAMP_GOAL ? '+1 → ' + STAMP_GOAL + '個達成！無料券を進呈' : '+1（' + curStamps + ' → ' + (curStamps + 1) + ' / ' + STAMP_GOAL + '）');
 
     var sc = s.scan;
     var memberPart;
     if (sel) {
-      memberPart = '<div class="selected-bar"><div class="av" style="background:' + avatarColor(sel.id) + '">' + esc(initials(sel.displayName)) + '</div><b>' + esc(sel.displayName) + '</b><span>現在 ' + fmt(sel.points) + ' ポイント</span><button class="chg" data-act="clearmember">別の会員</button></div>';
+      memberPart = '<div class="selected-bar"><div class="av" style="background:' + avatarColor(sel.id) + '">' + esc(initials(sel.displayName)) + '</div><b>' + esc(sel.displayName) + '</b><span>' + fmt(sel.points) + ' ポイント · スタンプ ' + (sel.stamps || 0) + '/' + STAMP_GOAL + '</span>' +
+        (hasTicket ? '<span class="pill gold">無料券 ' + sel.freeTickets + ' 枚</span>' : '') +
+        '<button class="chg" data-act="clearmember">別の会員</button></div>';
     } else {
       memberPart = '<div class="scanpanel">' +
         '<div class="st">お客様の会員QRコードをスキャン</div>' +
@@ -918,8 +987,9 @@
 
     var inviteBanner = s.lastInvite
       ? '<div class="invite-banner"><div class="ib-top">' + svg('gift') + '<div><b>招待コードを ' + esc(s.lastInvite.memberName) + ' さんにお渡しください</b>' +
-        '<span>ご利用ごとに1つ進呈。新規会員が初回登録時に入力すると、双方にポイントが付与されます。お客様は LINE の「お友達紹介」でも確認できます。</span></div></div>' +
+        '<span>ご利用ごとに1つ進呈。ほかの会員（新規・既存どちらでも）が入力すると、双方にポイントが付与されます。お客様は LINE の「お友達紹介」でも確認できます。</span></div></div>' +
         '<div class="ib-code num">' + esc(s.lastInvite.code) + '</div>' +
+        '<div class="ib-gain">（使われると ' + esc(s.lastInvite.memberName) + ' さん <b class="num">+' + fmt(yenOf(s.lastInvite.inviterBonus, s.lastInvite.redeemRate)) + '円分</b>・お友達 <b class="num">+' + fmt(yenOf(s.lastInvite.inviteeBonus, s.lastInvite.redeemRate)) + '円分</b>）</div>' +
         '<div class="ib-btns"><button class="btn ghost sm" data-act="copyinvite">コピー</button><button class="btn ghost sm" data-act="closeinvite">閉じる</button></div></div>'
       : '';
 
@@ -927,10 +997,15 @@
       inviteBanner +
       memberPart +
       '<div class="field amountbox"><label>お会計金額（円）</label><input class="input num" id="orderamount" type="number" min="0" inputmode="decimal" placeholder="0" value="' + esc(f.orderAmount) + '" ' + (sel ? '' : 'disabled') + '></div>' +
+      (hasTicket
+        ? '<div class="redeem-row ticket-row"><span style="font-size:13px;font-weight:700;">' + svg('ticket') + ' 無料券を使う（今回のお会計が無料）</span>' +
+          '<label class="switch"><input type="checkbox" id="tickettoggle" ' + (useTicket ? 'checked' : '') + '><span class="track"></span><span class="knob"></span></label>' +
+          '</div>'
+        : '') +
       '<div class="redeem-row"><span style="font-size:13px;font-weight:700;">ポイント利用</span>' +
-      '<label class="switch"><input type="checkbox" id="redeemtoggle" ' + (f.redeemOn ? 'checked' : '') + ' ' + (sel && maxUse > 0 ? '' : 'disabled') + '><span class="track"></span><span class="knob"></span></label>' +
+      '<label class="switch"><input type="checkbox" id="redeemtoggle" ' + (f.redeemOn && !useTicket ? 'checked' : '') + ' ' + (sel && maxUse > 0 ? '' : 'disabled') + '><span class="track"></span><span class="knob"></span></label>' +
       '</div>' +
-      (f.redeemOn && sel
+      (f.redeemOn && !useTicket && sel
         ? '<div class="redeem-panel">' +
           '<input type="range" class="redeem-slider" id="redeemslider" min="0" max="' + maxUse + '" step="1" value="' + redeemPts + '" ' + (maxUse <= 0 ? 'disabled' : '') + '>' +
           '<div class="field" style="flex-direction:row; align-items:center; gap:8px;"><span class="hint">利用</span><input class="input num" id="redeemnum" type="number" min="0" max="' + maxUse + '" value="' + redeemPts + '" style="width:90px;"><span class="hint">ポイント（最大 ' + maxUse + ' ポイント・今回のお会計の ' + maxRedeemPercent + '% が上限）</span></div>' +
@@ -938,9 +1013,9 @@
         : '') +
       '<div class="summary">' +
       '<div class="row"><span>お会計金額</span><b class="num">' + fmt(amount) + ' 円</b></div>' +
-      '<div class="row"><span>ポイント利用</span><b class="num" style="color:var(--blue);">- ' + fmt(discount) + ' 円</b></div>' +
+      '<div class="row"><span>' + (useTicket ? '無料券' : 'ポイント利用') + '</span><b class="num" style="color:var(--blue);">- ' + fmt(discount) + ' 円</b></div>' +
       '<div class="row total"><span>お支払い金額</span><b class="num">' + fmt(payable) + ' 円</b></div>' +
-      '<div class="row earn"><span>今回の獲得予定ポイント</span><b class="num">+' + earn + ' ポイント</b></div>' +
+      '<div class="row earn"><span>スタンプ</span><b class="num">' + stampText + '</b></div>' +
       '</div>' +
       '<button class="btn primary block" data-act="confirmpay" ' + (sel && amount > 0 && !state.staff.busy ? '' : 'disabled') + '>' + svg('check') + (state.staff.busy ? ' 処理中…' : ' 会計を確定') + '</button>' +
       '</div>';
@@ -978,11 +1053,11 @@
         } else if (act === 'pickmember') {
           var id = el.getAttribute('data-id');
           s.selectedMember = s.members.filter(function (m) { return m.id === id; })[0] || null;
-          s.checkoutForm = { orderAmount: '', redeemOn: false, redeemPoints: 0 };
+          s.checkoutForm = { orderAmount: '', redeemOn: false, redeemPoints: 0, useTicket: false };
           render();
         } else if (act === 'clearmember') {
           s.selectedMember = null;
-          s.checkoutForm = { orderAmount: '', redeemOn: false, redeemPoints: 0 };
+          s.checkoutForm = { orderAmount: '', redeemOn: false, redeemPoints: 0, useTicket: false };
           render();
         } else if (act === 'confirmpay') {
           var f = s.checkoutForm;
@@ -993,12 +1068,16 @@
             var res = await api('POST', '/api/staff/checkout', {
               memberId: s.selectedMember.id,
               orderAmount: amount,
-              redeemPoints: f.redeemOn ? (f.redeemPoints || 0) : 0
+              redeemPoints: f.redeemOn && !f.useTicket ? (f.redeemPoints || 0) : 0,
+              useFreeTicket: !!(f.useTicket && s.selectedMember.freeTickets > 0)
             });
-            s.lastInvite = { memberName: res.member.displayName, code: res.inviteCode, url: res.inviteShareUrl };
-            toast(res.member.displayName + ' さんに ' + res.transaction.earnedPoints + ' ポイント付与' + (res.transaction.redeemedPoints > 0 ? '、ポイント利用 ' + fmt(res.transaction.discount) + ' 円' : '') + '。会計が完了しました！');
+            s.lastInvite = { memberName: res.member.displayName, code: res.inviteCode, url: res.inviteShareUrl, inviterBonus: res.inviterBonus, inviteeBonus: res.inviteeBonus, redeemRate: res.redeemRate };
+            var rt = res.transaction;
+            toast(res.member.displayName + ' さん：' +
+              (rt.freeTicketUsed ? '無料券を使用しました' : 'スタンプ +' + rt.stampsAdded + (rt.ticketsEarned ? '、' + res.stampGoal + '個達成で無料券を進呈しました' : '（' + res.member.stamps + ' / ' + res.stampGoal + '）')) +
+              (rt.redeemedPoints > 0 ? '、ポイント利用 ' + fmt(rt.discount) + ' 円' : '') + '。会計が完了しました！');
             s.selectedMember = null;
-            s.checkoutForm = { orderAmount: '', redeemOn: false, redeemPoints: 0 };
+            s.checkoutForm = { orderAmount: '', redeemOn: false, redeemPoints: 0, useTicket: false };
             s.busy = false;
             render();
             if (s.searchOpen) searchStaffMembers();
@@ -1036,6 +1115,8 @@
     }
     var toggleEl = app.querySelector('#redeemtoggle');
     if (toggleEl) toggleEl.addEventListener('change', function () { state.staff.checkoutForm.redeemOn = toggleEl.checked; render(); });
+    var ticketEl = app.querySelector('#tickettoggle');
+    if (ticketEl) ticketEl.addEventListener('change', function () { state.staff.checkoutForm.useTicket = ticketEl.checked; render(); });
     var sliderEl = app.querySelector('#redeemslider');
     if (sliderEl) sliderEl.addEventListener('input', function () { state.staff.checkoutForm.redeemPoints = parseInt(sliderEl.value, 10) || 0; render(); });
     var redeemNumEl = app.querySelector('#redeemnum');
@@ -1159,7 +1240,7 @@
       '<div class="kpi-grid">' +
       kpiTile('users', '会員数合計', fmt(o.memberCount), '累計登録会員', 'var(--brand)', 'var(--brand-soft)') +
       kpiTile('ticket', '本日のチェックイン', fmt(o.todayCheckins), '件 · お客様のセルフチェックイン', 'var(--good)', 'var(--good-soft)') +
-      kpiTile('arrowUpRight', '本日の付与ポイント', '+' + fmt(o.todayIssued), 'ご利用 + チェックイン + ボーナス', 'var(--brand)', 'var(--brand-soft)') +
+      kpiTile('arrowUpRight', '本日の付与ポイント', '+' + fmt(o.todayIssued), 'チェックイン + ボーナス', 'var(--brand)', 'var(--brand-soft)') +
       kpiTile('tag', '本日の利用ポイント', '-' + fmt(o.todayRedeemed), 'お会計の割引に利用', 'var(--blue)', 'var(--blue-soft)') +
       '</div>' +
       '<div class="card chartcard">' +
@@ -1196,15 +1277,15 @@
     return '<div class="card padcard stack">' +
       '<div><div class="section-title">ポイントルール設定</div><div class="section-sub">変更はお客様用画面とレジにすぐ反映されます。別途公開する必要はありません。</div></div>' +
       '<div class="rules-grid">' +
-      ruleItem('earnRate', 'ご利用ポイント付与', 'ご利用', r.earnRate, '円ごとに 1 ポイント') +
       ruleItem('checkinPoints', '毎日チェックインポイント', '1日のチェックインで', r.checkinPoints, 'ポイント') +
       ruleItem('streak5Bonus', '連続チェックイン 5 日ボーナス', '5 日目に追加', r.streak5Bonus, 'ポイント') +
       ruleItem('streak10Bonus', '連続チェックイン 10 日ボーナス', '10 日目に追加', r.streak10Bonus, 'ポイント（付与後リセット）') +
-      ruleItem('inviterBonus', '紹介ボーナス（紹介した方）', 'お友達の登録成功で紹介した方に', r.inviterBonus, 'ポイント') +
-      ruleItem('inviteeBonus', '紹介ボーナス（新規会員）', '招待コードで登録した新規会員に', r.inviteeBonus, 'ポイント（別途 新規入会ボーナスあり）') +
+      ruleItem('inviterBonus', '紹介ボーナス（紹介した方）', '招待コードが使われたら紹介した方に', r.inviterBonus, 'ポイント') +
+      ruleItem('inviteeBonus', '紹介ボーナス（コードを使った方）', '招待コードを使った会員に', r.inviteeBonus, 'ポイント（お一人様1回まで）') +
       ruleItem('redeemRate', 'ポイント換算レート', '', r.redeemRate, 'ポイント = 1 円分') +
       rangeItem('maxRedeemPercent', '1回の利用上限', r.maxRedeemPercent, '%（お会計金額）', 0, 100) +
       '</div>' +
+      '<div class="section-sub" style="margin:0;">スタンプのルール：ご利用1回につきスタンプ1個（ご利用金額によるポイント付与はありません）。' + STAMP_GOAL + '個たまると無料券1枚を進呈し、次回のお会計が全額無料になります。無料券を使ったお会計ではスタンプは押されません。</div>' +
       '<div class="section-sub" style="margin:0;">チェックインのルール：お客様が1日1回スマホでチェックインします。連続 5 日目・10 日目は追加ポイントがあり、10 日目の付与後は1日目からやり直しです。1日でも休むとやり直しになります。ボーナスを 0 にすると、その段階のボーナスは無効になります。</div>' +
       '<div class="autosave" id="autosaveMsg">' + (state.admin.autosaveMsg ? svg('check') + ' ' + esc(state.admin.autosaveMsg) : '') + '</div>' +
       '</div>';
@@ -1222,7 +1303,7 @@
     var rows = state.admin.ledger.map(function (t) {
       var net = (t.earnedPoints || 0) - (t.redeemedPoints || 0);
       return '<tr><td>' + fmtDateTime(t.ts) + '</td><td class="name">' + esc(t.memberName) + '</td>' +
-        '<td>' + (t.type === 'checkin' ? '<span class="pill good">チェックイン</span>' : (t.type === 'bonus' ? '<span class="pill gold">ボーナス</span>' : t.redeemedPoints > 0 ? '<span class="pill blue">ご利用+ポイント利用</span>' : '<span class="pill neutral">ご利用</span>')) + '</td>' +
+        '<td>' + (t.type === 'checkin' ? '<span class="pill good">チェックイン</span>' : (t.type === 'bonus' ? '<span class="pill gold">ボーナス</span>' : t.freeTicketUsed ? '<span class="pill gold">無料券</span>' : t.redeemedPoints > 0 ? '<span class="pill blue">ご利用+ポイント利用</span>' : '<span class="pill neutral">ご利用</span>')) + '</td>' +
         '<td class="num">' + (t.type === 'purchase' ? fmt(t.paidAmount) + ' 円' : '—') + '</td>' +
         '<td class="num delta ' + (net >= 0 ? 'pos' : 'neg') + '">' + fmtSigned(net) + '</td>' +
         '<td>' + esc(t.note || '—') + '</td></tr>';

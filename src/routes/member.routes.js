@@ -20,5 +20,6 @@ router.get('/transactions', asyncHandler(ctrl.transactions));
 router.get('/qr', asyncHandler(ctrl.qr));
 router.get('/invites', asyncHandler(ctrl.invites));
 router.post('/checkin', checkinLimiter, asyncHandler(ctrl.checkin));
+router.post('/invite/redeem', checkinLimiter, asyncHandler(ctrl.redeemInvite));
 
 module.exports = router;

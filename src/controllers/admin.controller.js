@@ -74,6 +74,8 @@ async function ledger(req, res) {
       paidAmount: t.paidAmount,
       redeemedPoints: t.redeemedPoints,
       earnedPoints: t.earnedPoints,
+      stampsAdded: t.stampsAdded,
+      freeTicketUsed: t.freeTicketUsed,
       note: t.note,
       staffName: t.staffUser ? t.staffUser.name : null
     }))

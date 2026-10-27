@@ -52,7 +52,6 @@ async function lineLoginCallback(req, res) {
   res.clearCookie('invite_code', { path: '/' });
 
   let member = await prisma.member.findUnique({ where: { lineUserId: profile.userId } });
-  let isNew = false;
   if (member) {
     member = await prisma.member.update({
       where: { id: member.id },
@@ -74,7 +73,6 @@ async function lineLoginCallback(req, res) {
         });
         return created;
       });
-      isNew = true;
     } catch (e) {
       // 极少见：同一个人同时按了两次登入，另一个请求已经建立了会员
       member = await prisma.member.findUnique({ where: { lineUserId: profile.userId } });
@@ -82,18 +80,14 @@ async function lineLoginCallback(req, res) {
     }
   }
 
-  // 邀请码：只有「第一次加入」的新会员才能使用；已经是会员的人带码登入，不会消耗这组码。
+  // 邀请码：新会员、老会员都可以用（每人一生只能用一次，不能用自己的码）。
   let inviteResult = '';
   let inviteBonus = 0;
   if (inviteCookie) {
-    if (!isNew) {
-      inviteResult = 'existing';
-    } else {
-      const rules = await pointsService.getRules();
-      const r = await prisma.$transaction((tx) => inviteService.redeemInvite(tx, inviteCookie, member, rules));
-      inviteResult = r.ok ? 'ok' : r.reason;
-      inviteBonus = r.ok ? r.inviteeBonus : 0;
-    }
+    const rules = await pointsService.getRules();
+    const r = await prisma.$transaction((tx) => inviteService.redeemInvite(tx, inviteCookie, member, rules));
+    inviteResult = r.ok ? 'ok' : r.reason;
+    inviteBonus = r.ok ? r.inviteeBonus : 0;
   }
 
   const token = jwt.sign({ sub: member.id, type: 'member' }, '30d');

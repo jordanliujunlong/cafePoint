@@ -11,7 +11,7 @@ async function getRules() {
 }
 
 async function updateRules(patch) {
-  const allowed = ['earnRate', 'checkinPoints', 'streak5Bonus', 'streak10Bonus', 'redeemRate', 'maxRedeemPercent', 'inviterBonus', 'inviteeBonus'];
+  const allowed = ['checkinPoints', 'streak5Bonus', 'streak10Bonus', 'redeemRate', 'maxRedeemPercent', 'inviterBonus', 'inviteeBonus'];
   const data = {};
   for (const key of allowed) {
     if (patch[key] !== undefined) {
@@ -27,11 +27,6 @@ async function updateRules(patch) {
   });
 }
 
-function earnFromAmount(amount, rules) {
-  const rate = rules.earnRate || 10;
-  return Math.floor(Math.max(0, amount) / rate);
-}
-
 function pointsValue(points, rules) {
   const rate = rules.redeemRate || 10;
   return points / rate;
@@ -42,4 +37,4 @@ function maxUsablePoints(orderAmount, memberPoints, rules) {
   return Math.max(0, Math.min(memberPoints, byOrder));
 }
 
-module.exports = { getRules, updateRules, earnFromAmount, pointsValue, maxUsablePoints };
+module.exports = { getRules, updateRules, pointsValue, maxUsablePoints };

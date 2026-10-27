@@ -4,6 +4,7 @@ const { todayKey, daysAgoDate, dateKeyInTz } = require('../utils/date');
 const pointsService = require('../services/points.service');
 const jwtUtil = require('../utils/jwt');
 const inviteService = require('../services/invite.service');
+const stampService = require('../services/stamp.service');
 const config = require('../config');
 
 async function listMembers(req, res) {
@@ -22,7 +23,9 @@ async function listMembers(req, res) {
       displayName: m.displayName,
       pictureUrl: m.pictureUrl,
       phone: m.phone,
-      points: m.points
+      points: m.points,
+      stamps: m.stamps,
+      freeTickets: m.freeTickets
     }))
   );
 }
@@ -41,13 +44,15 @@ async function scan(req, res) {
       displayName: member.displayName,
       pictureUrl: member.pictureUrl,
       phone: member.phone,
-      points: member.points
+      points: member.points,
+      stamps: member.stamps,
+      freeTickets: member.freeTickets
     }
   });
 }
 
 async function checkout(req, res) {
-  const { memberId, orderAmount, redeemPoints } = req.body || {};
+  const { memberId, orderAmount, redeemPoints, useFreeTicket } = req.body || {};
   const amount = Number(orderAmount);
   if (!memberId || !Number.isFinite(amount) || amount <= 0) {
     throw new HttpError(400, '会員を選択し、正しいご利用金額を入力してください');
@@ -55,22 +60,32 @@ async function checkout(req, res) {
   const member = await prisma.member.findUnique({ where: { id: memberId } });
   if (!member) throw new HttpError(404, '会員が見つかりません');
 
-  const rules = await pointsService.getRules();
-  const maxUse = pointsService.maxUsablePoints(amount, member.points, rules);
-  const useRedeem = Math.max(0, Math.min(Number(redeemPoints) || 0, maxUse));
-  const discount = useRedeem / rules.redeemRate;
-  const paidAmount = Math.max(0, amount - discount);
-  const earnedPoints = pointsService.earnFromAmount(paidAmount, rules);
+  const useTicket = !!useFreeTicket;
+  if (useTicket && member.freeTickets < 1) throw new HttpError(400, 'この会員は無料券を持っていません');
 
-  // 扣积分 / 记账 / 产生邀请码要一起成功，或一起失败。
+  const rules = await pointsService.getRules();
+  // 无料券：这笔全额免费，不能同时折抵积分，也不盖章
+  const maxUse = useTicket ? 0 : pointsService.maxUsablePoints(amount, member.points, rules);
+  const useRedeem = Math.max(0, Math.min(Number(redeemPoints) || 0, maxUse));
+  const discount = useTicket ? amount : useRedeem / rules.redeemRate;
+  const paidAmount = Math.max(0, amount - discount);
+  const stampsAdded = useTicket ? 0 : 1;
+  const next = stampService.addStamps(member.stamps, stampsAdded);
+
+  // 扣积分 / 盖章 / 记账 / 产生邀请码要一起成功，或一起失败。
   const { updatedMember, tx, invite } = await prisma.$transaction(async (db) => {
-    const updatedMember = await db.member.update({
-      where: { id: member.id },
+    // 以读到的印章 / 免费券 / 积分为条件更新：同一位会员同时结两笔帐时，只有一笔会成功，不会多发或多扣。
+    const r = await db.member.updateMany({
+      where: { id: member.id, stamps: member.stamps, freeTickets: member.freeTickets, points: member.points },
       data: {
-        points: { increment: earnedPoints - useRedeem },
-        totalSpent: { increment: paidAmount }
+        points: { decrement: useRedeem },
+        totalSpent: { increment: paidAmount },
+        stamps: next.stamps,
+        freeTickets: member.freeTickets - (useTicket ? 1 : 0) + next.ticketsEarned
       }
     });
+    if (r.count === 0) throw new HttpError(409, '会員情報が更新されたため、会計を確定できませんでした。もう一度お試しください');
+    const updatedMember = await db.member.findUnique({ where: { id: member.id } });
     const tx = await db.transaction.create({
       data: {
         memberId: member.id,
@@ -79,8 +94,10 @@ async function checkout(req, res) {
         discount,
         redeemedPoints: useRedeem,
         paidAmount,
-        earnedPoints,
-        note: (req.body && req.body.note) || '',
+        earnedPoints: 0,
+        stampsAdded,
+        freeTicketUsed: useTicket,
+        note: (req.body && req.body.note) || (useTicket ? '無料券でご利用' : ''),
         staffUserId: req.staff.id
       }
     });
@@ -90,17 +107,29 @@ async function checkout(req, res) {
   });
 
   res.json({
-    member: { id: updatedMember.id, displayName: updatedMember.displayName, points: updatedMember.points },
+    member: {
+      id: updatedMember.id,
+      displayName: updatedMember.displayName,
+      points: updatedMember.points,
+      stamps: updatedMember.stamps,
+      freeTickets: updatedMember.freeTickets
+    },
     transaction: {
       id: tx.id,
       orderAmount: amount,
       discount,
       redeemedPoints: useRedeem,
       paidAmount,
-      earnedPoints
+      stampsAdded,
+      freeTicketUsed: useTicket,
+      ticketsEarned: next.ticketsEarned
     },
+    stampGoal: stampService.STAMP_GOAL,
     inviteCode: inviteService.formatCode(invite.code),
-    inviteShareUrl: `${config.appBaseUrl}/?invite=${invite.code}`
+    inviteShareUrl: `${config.appBaseUrl}/?invite=${invite.code}`,
+    inviterBonus: rules.inviterBonus,
+    inviteeBonus: rules.inviteeBonus,
+    redeemRate: rules.redeemRate
   });
 }
 
@@ -129,7 +158,9 @@ async function todayLog(req, res) {
       memberName: t.member ? t.member.displayName : '—',
       paidAmount: t.paidAmount,
       earnedPoints: t.earnedPoints,
-      redeemedPoints: t.redeemedPoints
+      redeemedPoints: t.redeemedPoints,
+      stampsAdded: t.stampsAdded,
+      freeTicketUsed: t.freeTicketUsed
     }))
   });
 }

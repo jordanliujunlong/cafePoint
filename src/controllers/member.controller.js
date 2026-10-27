@@ -6,6 +6,7 @@ const checkinService = require('../services/checkin.service');
 const jwtUtil = require('../utils/jwt');
 const config = require('../config');
 const inviteService = require('../services/invite.service');
+const stampService = require('../services/stamp.service');
 
 async function summary(req, res) {
   const member = await prisma.member.findUnique({ where: { id: req.member.id } });
@@ -32,6 +33,9 @@ async function summary(req, res) {
     points: member.points,
     totalSpent: member.totalSpent,
     pointsValue: pointsService.pointsValue(member.points, rules),
+    stamps: member.stamps,
+    freeTickets: member.freeTickets,
+    stampGoal: stampService.STAMP_GOAL,
     checkedInToday: member.lastCheckinDate === today,
     streak,
     cycleDays: checkinService.CYCLE_DAYS,
@@ -66,6 +70,8 @@ async function transactions(req, res) {
       redeemedPoints: t.redeemedPoints,
       paidAmount: t.paidAmount,
       earnedPoints: t.earnedPoints,
+      stampsAdded: t.stampsAdded,
+      freeTicketUsed: t.freeTicketUsed,
       note: t.note,
       staffName: t.staffUser ? t.staffUser.name : null
     }))
@@ -151,7 +157,7 @@ async function qr(req, res) {
   });
 }
 
-// 我的邀请码：每次消费收银员会给一组，一组只能被一位新会员使用一次。
+// 我的邀请码：每次消费收银员会给一组，一组只能被一位其他会员使用一次。
 async function invites(req, res) {
   const rows = await prisma.inviteCode.findMany({
     where: { inviterId: req.member.id },
@@ -160,7 +166,9 @@ async function invites(req, res) {
     include: { usedBy: { select: { displayName: true } } }
   });
   const rules = await pointsService.getRules();
+  const usedInvite = await prisma.inviteCode.findUnique({ where: { usedById: req.member.id }, select: { id: true } });
   res.json({
+    canRedeem: !usedInvite, // 自己还没用过别人的邀请码
     inviterBonus: rules.inviterBonus,
     inviteeBonus: rules.inviteeBonus,
     redeemRate: rules.redeemRate,
@@ -175,4 +183,29 @@ async function invites(req, res) {
   });
 }
 
-module.exports = { summary, transactions, checkin, qr, invites };
+const REDEEM_ERRORS = {
+  invalid: '招待コードが見つかりません。もう一度ご確認ください',
+  used: 'この招待コードはすでに使用されています',
+  self: 'ご自身の招待コードは使用できません',
+  already: '招待コードはお一人様1回までです。すでにご利用済みです'
+};
+
+// 已登入的会员（新、老都可以）输入朋友的邀请码。
+async function redeemInvite(req, res) {
+  const member = await prisma.member.findUnique({ where: { id: req.member.id } });
+  if (!member) throw new HttpError(404, '会員情報が見つかりません');
+  const rules = await pointsService.getRules();
+  let r;
+  try {
+    r = await prisma.$transaction((tx) => inviteService.redeemInvite(tx, req.body && req.body.code, member, rules));
+  } catch (e) {
+    // usedById 唯一约束：同一人同时送出两组码时，只有一组会成功
+    if (e && e.code === 'P2002') r = { ok: false, reason: 'already' };
+    else throw e;
+  }
+  if (!r.ok) throw new HttpError(400, REDEEM_ERRORS[r.reason] || REDEEM_ERRORS.invalid);
+  const updated = await prisma.member.findUnique({ where: { id: member.id }, select: { points: true } });
+  res.json({ ok: true, inviteeBonus: r.inviteeBonus, points: updated.points });
+}
+
+module.exports = { summary, transactions, checkin, qr, invites, redeemInvite };

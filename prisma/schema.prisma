@@ -5,8 +5,9 @@
 //  - Rule        积分规则（单例表，只会有一行 id = "singleton"）
 //  - CheckinCode （已停用）旧版店员动态签到码；改为顾客每日自助签到后不再使用，
 //                保留此表只是为了避免 prisma db push 时出现「删除数据表」的警告
-//  - InviteCode  每次消费后产生给顾客的一次性邀请码（只能邀请新会员，成功后双方都拿积分）
-//  - Transaction 所有积分变动纪录（签到 / 消费 / 新会员礼 / 连续签到奖励 / 邀请奖励）
+//  - InviteCode  每次消费后产生给顾客的一次性邀请码（任何其他会员都能用，每人一生只能用一次，成功后双方都拿积分）
+//  - Transaction 所有积分 / 印章变动纪录（签到 / 消费 / 新会员礼 / 连续签到奖励 / 邀请奖励）
+//  消费不再送积分，改为「集章」：每次消费盖 1 个章，集满 10 个换 1 张免费券（下次消费全额免费）
 
 datasource db {
   provider = "postgresql"
@@ -27,6 +28,8 @@ model Member {
   totalSpent      Float         @default(0)
   lastCheckinDate String? // 门店当地时区的 YYYY-MM-DD，用来判断「今日是否已签到」
   checkinStreak   Int           @default(0) // 目前连续签到天数（1~10；第 10 天领完奖励后，隔天从 1 重新开始）
+  stamps          Int           @default(0) // 目前印章数（0~9；集满 10 个时归零并发 1 张免费券）
+  freeTickets     Int           @default(0) // 尚未使用的免费券张数
   joinedAt        DateTime      @default(now())
   transactions    Transaction[]
   invitesCreated  InviteCode[]  @relation("Inviter")
@@ -47,7 +50,7 @@ model StaffUser {
 
 model Rule {
   id               String   @id @default("singleton")
-  earnRate         Int      @default(10) // 每消费 N 元 得 1 积分
+  earnRate         Int      @default(10) // （已停用）旧版：每消费 N 元 得 1 积分；改为集章后不再使用
   checkinPoints    Int      @default(5) // 每日签到获得的基本积分
   streak5Bonus     Int      @default(5) // 连续签到满 5 天，当天额外奖励的积分
   streak10Bonus    Int      @default(10) // 连续签到满 10 天，当天额外奖励的积分（领完后重置）
@@ -72,7 +75,7 @@ model InviteCode {
   inviter    Member    @relation("Inviter", fields: [inviterId], references: [id])
   sourceTxId String? // 是哪一笔消费产生的
   createdAt  DateTime  @default(now())
-  usedById   String?   @unique // 谁用了这组码（一个人只能被邀请一次、一组码只能用一次）
+  usedById   String?   @unique // 谁用了这组码（一个人一生只能用一次邀请码、一组码只能用一次）
   usedBy     Member?   @relation("Invitee", fields: [usedById], references: [id])
   usedAt     DateTime?
 
@@ -90,6 +93,8 @@ model Transaction {
   redeemedPoints Int?
   paidAmount     Float?
   earnedPoints   Int      @default(0)
+  stampsAdded    Int      @default(0) // 这笔消费盖了几个章（一般 1；用免费券的那笔为 0）
+  freeTicketUsed Boolean  @default(false) // 这笔消费是否使用了免费券
   note           String?
   staffUserId    String?
   staffUser      StaffUser? @relation(fields: [staffUserId], references: [id])
