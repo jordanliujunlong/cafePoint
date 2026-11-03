@@ -408,7 +408,7 @@
           streakCardHtml(s, c) +
           '<button class="invite-card" data-act="goinvites">' +
           '<div class="ic">' + svg('gift') + '</div>' +
-          '<div class="tx"><b>お友達紹介</b>' +
+          '<div class="tx"><b>お友達紹介コード</b>' +
           '<div class="ic-rewards"><span class="rw-pill">あなた <b class="num">' + fmt(yenOf(s.rules.inviterBonus, s.rules.redeemRate)) + '円分</b></span>' +
           '<span class="rw-pill">お友達 <b class="num">' + fmt(yenOf(s.rules.inviteeBonus, s.rules.redeemRate)) + '円分</b></span></div>' +
           '<span>' + (s.unusedInvites ? 'お渡しできる招待コードが ' + s.unusedInvites + ' 件あります' : 'ご利用後にスタッフが招待コードをお渡しします') + '</span></div>' +
@@ -425,7 +425,7 @@
       var all = c.transactions || [];
       body = c.loading ? loadingBlock() : (all.length ? '<div>' + all.map(txRowHtml).join('') + '</div>' : '<div class="empty">' + svg('list') + '<div>履歴はまだありません</div></div>');
     } else if (scr === 'invites') {
-      header = custHeader('お友達紹介', { back: true });
+      header = custHeader('お友達紹介コード', { back: true });
       showNav = true;
       var iv = c.invites;
       var listHtml = '';
@@ -456,8 +456,6 @@
             '<div class="redeem-input"><input class="input num" id="friendcode" autocomplete="off" autocapitalize="characters" maxlength="9" placeholder="例：K7M4-Q9XT" value="' + esc(c.friendCode || '') + '">' +
             '<button class="btn primary sm" data-act="redeemfriend" ' + (c.redeemBusy ? 'disabled' : '') + '>' + (c.redeemBusy ? '処理中…' : '使う') + '</button></div></div>'
           : '') +
-        '<div class="invite-intro"><b>ご利用のたびに、スタッフが招待コードをお渡しします</b>' +
-        '<p>お友達がコードを入力（またはあなたの招待リンクを開いてログイン）すると、上記のポイントがお互いに付与されます。新規・既存の会員どちらでも使えます。コードは1回のみ有効で、ご自身では使えません。</p></div>' +
         '<div class="inv-list">' + listHtml + '</div>';
     } else if (scr === 'qr') {
       header = custHeader('会員コード', { back: true });
@@ -987,7 +985,7 @@
 
     var inviteBanner = s.lastInvite
       ? '<div class="invite-banner"><div class="ib-top">' + svg('gift') + '<div><b>招待コードを ' + esc(s.lastInvite.memberName) + ' さんにお渡しください</b>' +
-        '<span>ご利用ごとに1つ進呈。ほかの会員（新規・既存どちらでも）が入力すると、双方にポイントが付与されます。お客様は LINE の「お友達紹介」でも確認できます。</span></div></div>' +
+        '<span>ご利用ごとに1つ進呈。ほかの会員（新規・既存どちらでも）が入力すると、双方にポイントが付与されます。お客様は LINE の「お友達紹介コード」でも確認できます。</span></div></div>' +
         '<div class="ib-code num">' + esc(s.lastInvite.code) + '</div>' +
         '<div class="ib-gain">（使われると ' + esc(s.lastInvite.memberName) + ' さん <b class="num">+' + fmt(yenOf(s.lastInvite.inviterBonus, s.lastInvite.redeemRate)) + '円分</b>・お友達 <b class="num">+' + fmt(yenOf(s.lastInvite.inviteeBonus, s.lastInvite.redeemRate)) + '円分</b>）</div>' +
         '<div class="ib-btns"><button class="btn ghost sm" data-act="copyinvite">コピー</button><button class="btn ghost sm" data-act="closeinvite">閉じる</button></div></div>'
