@@ -407,7 +407,6 @@
           stampCardHtml(s) +
           streakCardHtml(s, c) +
           '<button class="invite-card" data-act="goinvites">' +
-          '<div class="ic">' + svg('gift') + '</div>' +
           '<div class="tx"><b>お友達紹介コード</b>' +
           '<div class="ic-rewards"><span class="rw-pill">あなた <b class="num">' + fmt(yenOf(s.rules.inviterBonus, s.rules.redeemRate)) + '円分</b></span>' +
           '<span class="rw-pill">お友達 <b class="num">' + fmt(yenOf(s.rules.inviteeBonus, s.rules.redeemRate)) + '円分</b></span></div>' +
