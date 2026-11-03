@@ -67,7 +67,7 @@ app.use('/api', notFoundHandler);
 app.use(errorHandler);
 
 app.listen(config.port, () => {
-  console.log(`本町咖啡积分系统后端已启动： http://localhost:${config.port}`);
+  console.log(`超级麻辣烫积分系统后端已启动： http://localhost:${config.port}`);
   console.log(`APP_BASE_URL = ${config.appBaseUrl}`);
   if (!config.line.channelId) {
     console.warn('⚠️  尚未设定 LINE_CHANNEL_ID / LINE_CHANNEL_SECRET，顾客端 LINE 登入暂时无法使用。');

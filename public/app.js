@@ -78,6 +78,7 @@
       alert: '<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L2.5 18a1.8 1.8 0 001.6 2.7h15.8a1.8 1.8 0 001.6-2.7L13.7 3.9a1.8 1.8 0 00-3.4 0z"/>',
       lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>',
       trash: '<path d="M4 7h16M9 7V5a2 2 0 012-2h2a2 2 0 012 2v2m-8 0l1 12a2 2 0 002 2h4a2 2 0 002-2l1-12"/>',
+      bowl: '<path d="M3 11h18"/><path d="M4 11a8 8 0 0016 0"/><path d="M9 19.5h6"/><path d="M13 3l-2.5 8M18 3.5l-5 7.5"/>',
       key: '<circle cx="8" cy="15" r="4"/><path d="M10.5 12.5L20 3m-4 0h4v4m-9 5l2.5 2.5"/>'
     };
     return P[name] || '';
@@ -158,7 +159,7 @@
 
   /* ================= 顶部导览 ================= */
   var ROLES = [
-    { id: 'customer', label: 'お客様用', icon: 'coffee', ctx: 'LINE会員カード（スマホ表示）' },
+    { id: 'customer', label: 'お客様用', icon: 'bowl', ctx: 'LINE会員カード（スマホ表示）' },
     { id: 'staff', label: 'レジ（スタッフ）', icon: 'wallet', ctx: '店舗レジ / タブレット表示' },
     { id: 'admin', label: '管理画面', icon: 'sliders', ctx: '管理者向け：ポイントルールの設定とデータ確認' }
   ];
@@ -375,10 +376,10 @@
     if (scr !== 'qr') stopQrTimer();
 
     if (scr === 'login') {
-      header = custHeader('本町珈琲 会員カード');
+      header = custHeader('スーパー麻辣湯 会員カード');
       body =
         '<div class="login-hero">' +
-        '<div class="badge">' + svg('coffee') + '</div>' +
+        '<div class="badge">' + svg('bowl') + '</div>' +
         '<h3>ポイントを貯めはじめましょう</h3>' +
         '<p>ご利用ごとにスタンプが貯まり、' + STAMP_GOAL + '個で次回のお会計が無料に。毎日のチェックインでポイントも貯まり、お会計に使えます。</p>' +
         '</div>' +
@@ -386,7 +387,7 @@
         '<div class="invite-box"><label for="invitecode">招待コードをお持ちですか？（任意・お一人様1回まで）</label>' +
         '<input class="input" id="invitecode" autocomplete="off" autocapitalize="characters" maxlength="9" placeholder="例：K7M4-Q9XT" value="' + esc(c.inviteInput) + '">' +
         '<div class="invite-status ' + (c.inviteStatus ? c.inviteStatus.kind : '') + '" id="invitestatus">' + esc(c.inviteStatus ? c.inviteStatus.text : '') + '</div></div>' +
-        '<button class="btn line block" data-act="linelogin" style="border:1px solid var(--border);">' + svg('coffee') + ' LINEアカウントで続ける</button>' +
+        '<button class="btn line block" data-act="linelogin" style="border:1px solid var(--border);">' + svg('bowl') + ' LINEアカウントで続ける</button>' +
         '<p class="login-legal">続けることで「会員規約」と「プライバシーポリシー」に同意したものとみなされます</p>';
     } else if (scr === 'home') {
       header = custHeader('マイ会員カード', { logout: true });
@@ -515,7 +516,7 @@
     for (var i = 1; i <= goal; i++) {
       var on = i <= n;
       cells += '<div class="stamp-cell' + (on ? ' on' : '') + (i === goal ? ' goal' : '') + '">' +
-        (on ? '<div class="stamp-mark">' + svg('coffee') + '</div>'
+        (on ? '<div class="stamp-mark">' + svg('bowl') + '</div>'
           : (i === goal ? svg('gift') + '<span>FREE</span>' : '<span class="num">' + i + '</span>')) +
         '</div>';
     }
@@ -559,7 +560,7 @@
   function txRowHtml(t) {
     var isCheckin = t.type === 'checkin';
     var isBonus = t.type === 'bonus';
-    var iconName = isCheckin ? 'ticket' : (isBonus ? 'gift' : 'cup');
+    var iconName = isCheckin ? 'ticket' : (isBonus ? 'gift' : 'bowl');
     var bg = isCheckin || isBonus ? 'var(--good-soft)' : 'var(--brand-soft)';
     var color = isCheckin || isBonus ? 'var(--good)' : 'var(--brand)';
     var title = isCheckin ? (t.note || '毎日チェックイン') : (isBonus ? (t.note || '新規入会ボーナス') : (t.note || 'ご利用'));

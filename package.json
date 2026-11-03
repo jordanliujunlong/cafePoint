@@ -1,7 +1,7 @@
 {
   "name": "benmachi-points-backend",
   "version": "1.0.0",
-  "description": "本町咖啡积分系统 - 后端 API + 静态前端 (Express + PostgreSQL + Prisma)",
+  "description": "超级麻辣烫积分系统 - 后端 API + 静态前端 (Express + PostgreSQL + Prisma)",
   "private": true,
   "type": "commonjs",
   "engines": {

@@ -1,4 +1,4 @@
-# 本町咖啡积分系统 · 后端 + 前端
+# 超级麻辣烫（スーパー麻辣湯）积分系统 · 后端 + 前端
 
 一个可以直接上线的 LINE 会员积分系统：顾客用 LINE 帐号登入、每天自己在手机上签到领积分（连续签到 5 天、10 天有额外奖励）、
 每次消费自动累积积分、结账时可以用积分折抵金额。包含三个角色：
@@ -91,7 +91,7 @@ npm run dev
 ## 二、申请 LINE Login（顾客端登入用）
 
 1. 前往 [LINE Developers Console](https://developers.line.biz/console/)，用你的 LINE 帐号登入。
-2. 建立一个 **Provider**（如果还没有的话），例如叫「本町咖啡」。
+2. 建立一个 **Provider**（如果还没有的话），例如叫「スーパー麻辣湯」。
 3. 在该 Provider 底下新建一个 **Channel**，类型选 **LINE Login**。
 4. 填写 Channel 名称、说明、分类、email 等基本资料后建立。
 5. 进入这个 Channel 的设定页：
@@ -104,7 +104,7 @@ npm run dev
 6. 把 Channel ID / Channel secret 填进 `.env`（本地）或 Railway 的环境变量（部署时，见下一节）里的
    `LINE_CHANNEL_ID` / `LINE_CHANNEL_SECRET`。
 
-> 顾客第一次用 LINE 登入时，只会跳出「本町咖啡想取得你的个人资料（名称、头像）」的授权画面，
+> 顾客第一次用 LINE 登入时，只会跳出「スーパー麻辣湯想取得你的个人资料（名称、头像）」的授权画面，
 > 不需要额外审核就能给一般顾客使用；如果之后想上架成 LINE 官方帐号的选单连结、或需要更多权限，
 > 才需要额外申请。
 
