@@ -18,8 +18,9 @@ module.exports = {
   jwtSecret: required('JWT_SECRET', 'dev-only-insecure-secret-change-me'),
   storeTz: process.env.STORE_TZ || 'Asia/Taipei',
   line: {
-    channelId: process.env.LINE_CHANNEL_ID || '',
-    channelSecret: process.env.LINE_CHANNEL_SECRET || '',
+    // 管理画面からコピーしたときに紛れ込みやすい前後の空白・改行を除く
+    channelId: (process.env.LINE_CHANNEL_ID || '').trim(),
+    channelSecret: (process.env.LINE_CHANNEL_SECRET || '').trim(),
     get redirectUri() {
       return `${module.exports.appBaseUrl}/api/auth/line/callback`;
     }
