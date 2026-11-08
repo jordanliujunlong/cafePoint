@@ -155,6 +155,13 @@
   }
   @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .phone .notch{background:#000;}}
   :root[data-theme="dark"] .phone .notch{background:#000;}
+  /* お客様用の URL（/）：デモ用のスマホ枠・ヘッダーを外して全画面表示 */
+  .customer-only body{padding:0; margin:0;}
+  .customer-only .topbar, .customer-only .context-line{display:none;}
+  .customer-only .shell{max-width:none; gap:0;}
+  .customer-only .phone{max-width:560px; margin-inline:auto; height:100vh; height:100dvh; border:none; border-radius:0; box-shadow:none;}
+  .customer-only .phone .notch{display:none;}
+  .customer-only .linebar{padding-top:calc(env(safe-area-inset-top, 0px) + 14px);}
   .linebar{
     background:var(--brand); color:#fff; padding:16px 16px 12px; flex:none; position:relative; z-index:2;
     display:flex; align-items:center; gap:10px;

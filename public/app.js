@@ -121,11 +121,17 @@
     }, 2600);
   }
 
+  /* ================= 入口：お客様は「/」、スタッフは「/staff」、管理者は「/admin」 ================= */
+  var PATH = location.pathname.replace(/\/+$/, '') || '/';
+  var STAFF_SITE = PATH === '/staff' || PATH === '/admin';
+  // お客様用の URL ではタブ・ヘッダーを出さず、会員カードだけを全画面で表示する
+  if (!STAFF_SITE) document.documentElement.classList.add('customer-only');
+
   /* ================= 全局状态 ================= */
   var state = {
     session: { member: null, staff: null },
     booted: false,
-    role: 'customer',
+    role: PATH === '/admin' ? 'admin' : (STAFF_SITE ? 'staff' : 'customer'),
 
     customer: { screen: 'login', summary: null, transactions: null, loading: false, busy: false, lastCheckin: null, qr: null, qrError: '', loginError: '', inviteInput: '', inviteStatus: null, invites: null, friendCode: '', redeemBusy: false },
 
@@ -164,17 +170,9 @@
     { id: 'admin', label: '管理画面', icon: 'sliders', ctx: '管理者向け：ポイントルールの設定とデータ確認' }
   ];
   function renderChrome() {
-    var rs = document.getElementById('roleswitch');
-    rs.innerHTML = ROLES.map(function (r) {
-      return '<button data-role="' + r.id + '" class="' + (state.role === r.id ? 'active' : '') + '">' + svg(r.icon) + '<span>' + r.label + '</span></button>';
-    }).join('');
-    Array.prototype.forEach.call(rs.querySelectorAll('button'), function (b) {
-      b.addEventListener('click', function () {
-        state.role = b.getAttribute('data-role');
-        onRoleEnter();
-        render();
-      });
-    });
+    // 画面は URL ごとに1つだけ（/ = お客様用、/staff = レジ、/admin = 管理画面）。切り替えタブは出さない
+    if (!STAFF_SITE) return;
+    document.getElementById('roleswitch').style.display = 'none';
     var cur = ROLES.filter(function (r) { return r.id === state.role; })[0];
     document.getElementById('contextline').innerHTML = svg('arrowUpRight') + '<span>' + cur.ctx + '</span>';
   }
