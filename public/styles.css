@@ -444,7 +444,7 @@
   .streak-card .sc-head{display:flex; align-items:flex-start; justify-content:space-between; gap:8px;}
   .streak-card .sc-head b{display:block; font-size:14px; white-space:nowrap;}
   .streak-card .sc-head span{font-size:11.5px; color:var(--ink-muted);}
-  .streak-card .rule-tip{display:flex; align-items:center; gap:6px; margin-top:10px; font-size:12.5px; font-weight:700; line-height:1.4; color:var(--gold-ink); background:var(--gold-soft); padding:7px 12px; border-radius:var(--radius-m, 12px);}
+  .streak-card .rule-tip{display:flex; align-items:center; gap:6px; margin-top:5px; font-size:12.5px; font-weight:700; line-height:1.4; color:var(--gold-ink); background:var(--gold-soft); padding:7px 12px; border-radius:var(--radius-m, 12px);}
   .streak-card .rule-tip svg{width:16px; height:16px; flex:none;}
   .streak-card .rule-tip b{font-size:14px;}
   .sdots{display:grid; grid-template-columns:repeat(5,1fr); gap:10px 6px;}
