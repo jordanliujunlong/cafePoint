@@ -23,6 +23,15 @@ module.exports = {
     channelSecret: (process.env.LINE_CHANNEL_SECRET || '').trim(),
     get redirectUri() {
       return `${module.exports.appBaseUrl}/api/auth/line/callback`;
-    }
+    },
+    // LIFF アプリの ID（LINE Login チャネル → LIFF タブ）。未設定なら従来の LINE Login で動く
+    liffId: (process.env.LIFF_ID || '').trim()
+  },
+  /** お客様に案内する URL（招待リンク等）。LIFF があれば LINE アプリ内で開く liff.line.me の URL */
+  customerUrl(query) {
+    const base = module.exports.line.liffId
+      ? `https://liff.line.me/${module.exports.line.liffId}`
+      : `${module.exports.appBaseUrl}/`;
+    return query ? `${base}?${query}` : base;
   }
 };

@@ -78,10 +78,10 @@ async function checkout(req, res) {
     const r = await db.member.updateMany({
       where: { id: member.id, stamps: member.stamps, freeTickets: member.freeTickets, points: member.points },
       data: {
-        points: { decrement: useRedeem },
+        points: member.points - useRedeem + next.rewardPoints,
         totalSpent: { increment: paidAmount },
         stamps: next.stamps,
-        freeTickets: member.freeTickets - (useTicket ? 1 : 0) + next.ticketsEarned
+        freeTickets: member.freeTickets - (useTicket ? 1 : 0)
       }
     });
     if (r.count === 0) throw new HttpError(409, '会員情報が更新されたため、会計を確定できませんでした。もう一度お試しください');
@@ -101,6 +101,17 @@ async function checkout(req, res) {
         staffUserId: req.staff.id
       }
     });
+    // 集满印章：送积分，另记一笔奖励
+    if (next.rewardPoints > 0) {
+      await db.transaction.create({
+        data: {
+          memberId: member.id,
+          type: 'bonus',
+          earnedPoints: next.rewardPoints,
+          note: `スタンプ${stampService.STAMP_GOAL}個達成ボーナス`
+        }
+      });
+    }
     // 每次消费，给这位顾客一组一次性邀请码
     const invite = await inviteService.issueInviteCode(db, member.id, tx.id);
     return { updatedMember, tx, invite };
@@ -122,11 +133,12 @@ async function checkout(req, res) {
       paidAmount,
       stampsAdded,
       freeTicketUsed: useTicket,
-      ticketsEarned: next.ticketsEarned
+      stampRewardPoints: next.rewardPoints
     },
     stampGoal: stampService.STAMP_GOAL,
+    stampReward: stampService.STAMP_REWARD_POINTS,
     inviteCode: inviteService.formatCode(invite.code),
-    inviteShareUrl: `${config.appBaseUrl}/?invite=${invite.code}`,
+    inviteShareUrl: config.customerUrl(`invite=${invite.code}`),
     inviterBonus: rules.inviterBonus,
     inviteeBonus: rules.inviteeBonus,
     redeemRate: rules.redeemRate

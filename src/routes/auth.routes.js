@@ -23,6 +23,7 @@ const inviteLimiter = rateLimit({
 });
 router.get('/invite/check', inviteLimiter, asyncHandler(ctrl.inviteCheck));
 
+router.post('/liff', inviteLimiter, asyncHandler(ctrl.liffLogin));
 router.get('/line/login', asyncHandler(ctrl.lineLoginStart));
 router.get('/line/callback', asyncHandler(ctrl.lineLoginCallback));
 router.post('/member/logout', asyncHandler(ctrl.memberLogout));

@@ -11,7 +11,8 @@
     n = Math.round(Number(n) || 0);
     return n.toLocaleString('ja-JP');
   }
-  var STAMP_GOAL = 10; // スタンプ何個で無料券1枚（サーバーの stamp.service.js と同じ値）
+  var STAMP_GOAL = 10; // スタンプ何個でボーナス（サーバーの stamp.service.js と同じ値）
+  var STAMP_REWARD = 2000; // 達成時にもらえるポイント（同上）
   // ポイント → 円換算（お会計で使える金額）
   function yenOf(points, redeemRate) {
     return Math.floor((Number(points) || 0) / (Number(redeemRate) || 10));
@@ -187,26 +188,50 @@
     return '<div class="loading-wrap"><div class="spinner"></div><div>' + esc(label || '読み込み中…') + '</div></div>';
   }
 
+  /* ================= LIFF（LINE アプリ内で開くと自動ログイン）================= */
+  var LIFF_ID = (window.APP_CONFIG && window.APP_CONFIG.liffId) || '';
+  var liffReady = false;
+  async function initLiff() {
+    if (STAFF_SITE || !LIFF_ID) return false; // LIFF 未設定なら従来の LINE Login を使う
+    try {
+      await loadScriptOnce('https://static.line-scdn.net/liff/edge/2/sdk.js');
+      await window.liff.init({ liffId: LIFF_ID });
+      return true;
+    } catch (e) {
+      console.warn('LIFF の初期化に失敗しました', e);
+      return false;
+    }
+  }
+  function readPendingInvite() {
+    try { var v = sessionStorage.getItem('pendingInvite') || ''; sessionStorage.removeItem('pendingInvite'); return v; } catch (e) { return ''; }
+  }
+  function inviteNoticeFor(ir, bonus) {
+    return ir === 'ok' ? { msg: '招待コードを適用しました！紹介ボーナス +' + bonus + ' ポイントを付与しました', kind: 'ok' }
+      : ir === 'already' ? { msg: '招待コードはお一人様1回までです。すでにご利用済みのため、このコードは消費されていません', kind: 'err' }
+      : ir === 'used' ? { msg: 'この招待コードはすでに使用されているため、紹介ボーナスはありません', kind: 'err' }
+      : ir === 'self' ? { msg: 'ご自身の招待コードは使用できません', kind: 'err' }
+      : { msg: '招待コードが無効のため、紹介ボーナスはありません', kind: 'err' };
+  }
+
   /* ================= 启动：抓目前登入状态 ================= */
   async function boot() {
+    liffReady = await initLiff();
+    // liff.line.me 経由で開いたときは、liff.init が本来の URL へ移動し直すのでそれを待つ
+    if (liffReady && new URLSearchParams(location.search).has('liff.state')) return;
+
     var params = new URLSearchParams(location.search);
     var inviteNotice = '';
     if (params.get('login_error')) {
       state.customer.loginError = params.get('login_error');
     }
-    if (params.get('invite')) {
-      state.customer.inviteInput = params.get('invite').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^(.{4})(.+)$/, '$1-$2');
+    var inviteParam = params.get('invite') || readPendingInvite();
+    if (inviteParam) {
+      state.customer.inviteInput = inviteParam.toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^(.{4})(.+)$/, '$1-$2');
     }
     if (params.get('invite_result')) {
-      var ir = params.get('invite_result');
-      var bonus = parseInt(params.get('invite_bonus'), 10) || 0;
-      inviteNotice = ir === 'ok' ? { msg: '登録完了！紹介ボーナス +' + bonus + ' ポイントを付与しました', kind: 'ok' }
-        : ir === 'already' ? { msg: '招待コードはお一人様1回までです。すでにご利用済みのため、このコードは消費されていません', kind: 'err' }
-        : ir === 'used' ? { msg: 'この招待コードはすでに使用されているため、紹介ボーナスはありません', kind: 'err' }
-        : ir === 'self' ? { msg: 'ご自身の招待コードは使用できません', kind: 'err' }
-        : { msg: '招待コードが無効のため、紹介ボーナスはありません', kind: 'err' };
+      inviteNotice = inviteNoticeFor(params.get('invite_result'), parseInt(params.get('invite_bonus'), 10) || 0);
     }
-    if (params.get('login_error') || params.get('invite') || params.get('invite_result')) {
+    if (params.get('login_error') || params.get('invite') || params.get('invite_result') || params.get('code')) {
       history.replaceState({}, '', location.pathname);
     }
     try {
@@ -215,6 +240,21 @@
       state.session.staff = me.staff;
     } catch (e) {
       // 拿不到登入状态就当作都还没登入
+    }
+    // LINE アプリ内（または liff.login() から戻ってきた直後）は、同意画面なしでそのままログイン
+    if (!STAFF_SITE && !state.session.member && liffReady && window.liff.isLoggedIn()) {
+      try {
+        var r = await api('POST', '/api/auth/liff', {
+          idToken: window.liff.getIDToken(),
+          invite: (state.customer.inviteInput || '').replace(/[^A-Za-z0-9]/g, '')
+        });
+        state.customer.inviteInput = '';
+        state.customer.inviteStatus = null;
+        if (r.inviteResult) inviteNotice = inviteNoticeFor(r.inviteResult, r.inviteBonus);
+        state.session.member = (await api('GET', '/api/auth/me')).member;
+      } catch (e) {
+        state.customer.loginError = e.message;
+      }
     }
     state.customer.screen = state.session.member ? 'home' : 'login';
     state.booted = true;
@@ -379,7 +419,7 @@
         '<div class="login-hero">' +
         '<div class="badge">' + svg('bowl') + '</div>' +
         '<h3>ポイントを貯めはじめましょう</h3>' +
-        '<p>ご利用ごとにスタンプが貯まり、' + STAMP_GOAL + '個で次回のお会計が無料に。毎日のチェックインでポイントも貯まり、お会計に使えます。</p>' +
+        '<p>ご利用ごとにスタンプが貯まり、' + STAMP_GOAL + '個で ' + fmt(STAMP_REWARD) + ' ポイントをプレゼント。毎日のチェックインでポイントも貯まり、お会計に使えます。</p>' +
         '</div>' +
         (c.loginError ? '<div class="banner crit">' + svg('alert') + '<span>' + esc(c.loginError) + '</span></div>' : '') +
         '<div class="invite-box"><label for="invitecode">招待コードをお持ちですか？（任意・お一人様1回まで）</label>' +
@@ -435,8 +475,7 @@
           : '<div class="inv-row"><div class="inv-code num">' + esc(k.code) + '</div>' +
             '<div class="inv-gain">（使われると あなた <b class="num">+' + fmt(yenOf(iv.inviterBonus, iv.redeemRate)) + '円分</b>・お友達 <b class="num">+' + fmt(yenOf(iv.inviteeBonus, iv.redeemRate)) + '円分</b>）</div>' +
             '<div class="inv-meta">利用可能 · ご自身以外の会員ならどなたでも（お一人様1回まで）</div>' +
-            '<div class="inv-btns"><button class="btn ghost sm" data-act="copycode" data-i="' + idx + '">コードをコピー</button>' +
-            '<button class="btn primary sm" data-act="copylink" data-i="' + idx + '">リンクをコピー</button></div></div>';
+            '<div class="inv-btns"><button class="btn primary sm" data-act="copylink" data-i="' + idx + '">リンクをコピー</button></div></div>';
       }).join('');
       var rewardTile = function (who, pts) {
         return '<div class="rw-tile"><div class="rw-who">' + who + '</div>' +
@@ -465,7 +504,7 @@
         '<div class="qr-name"><b>' + esc((c.qr && c.qr.displayName) || sm.displayName || '') + '</b></div>' +
         '<div class="qr-bar"><div id="qrbar"></div></div>' +
         '<div class="qr-cap" id="qrcap"></div>' +
-        '<p class="qr-tip">お会計の際にこの画面をスタッフにスキャンしてもらうと、スタンプの押印・無料券やポイントの利用ができます。QRコードは60秒ごとに自動更新されるため、スクリーンショットは長くは使えません。</p>' +
+        '<p class="qr-tip">お会計の際にこの画面をスタッフにスキャンしてもらうと、スタンプの押印やポイントの利用ができます。QRコードは60秒ごとに自動更新されるため、スクリーンショットは長くは使えません。</p>' +
         '</div>';
     } else if (scr === 'checkinSuccess') {
       header = custHeader('毎日チェックイン', { back: true });
@@ -509,23 +548,24 @@
 
   function stampCardHtml(s) {
     var goal = s.stampGoal || STAMP_GOAL;
+    var reward = s.stampReward || STAMP_REWARD;
     var n = s.stamps || 0;
     var cells = '';
     for (var i = 1; i <= goal; i++) {
       var on = i <= n;
       cells += '<div class="stamp-cell' + (on ? ' on' : '') + (i === goal ? ' goal' : '') + '">' +
         (on ? '<div class="stamp-mark">' + svg('bowl') + '</div>'
-          : (i === goal ? svg('gift') + '<span>FREE</span>' : '<span class="num">' + i + '</span>')) +
+          : (i === goal ? svg('gift') + '<span class="num">' + reward + 'pt</span>' : '<span class="num">' + i + '</span>')) +
         '</div>';
     }
     return '<div class="card stamp-card">' +
-      '<div class="stc-head"><div><b>スタンプカード</b><span>ご利用1回で1個 · ' + goal + '個で次回無料</span></div>' +
+      '<div class="stc-head"><div><b>スタンプカード</b><span>ご利用1回で1個 · ' + goal + '個で ' + fmt(reward) + ' ポイント</span></div>' +
       '<div class="stc-count num">' + n + '<small>/' + goal + '</small></div></div>' +
       (s.freeTickets
         ? '<div class="free-ticket">' + svg('ticket') + '<div><b>無料券 ' + s.freeTickets + ' 枚あります！</b><span>次回のお会計が無料になります。お会計時にスタッフへお伝えください</span></div></div>'
         : '') +
       '<div class="stamp-grid">' + cells + '</div>' +
-      '<div class="stc-hint">' + svg('zap') + '<span>あと <b class="num">' + (goal - n) + '</b> 個で無料券！</span></div>' +
+      '<div class="stc-hint">' + svg('zap') + '<span>あと <b class="num">' + (goal - n) + '</b> 個で ' + fmt(reward) + ' ポイント！</span></div>' +
       '</div>';
   }
 
@@ -626,12 +666,20 @@
         var c = state.customer;
         if (act === 'linelogin') {
           var inv = (c.inviteInput || '').replace(/[^A-Za-z0-9]/g, '');
+          if (liffReady) {
+            // LIFF：LINE のログイン画面から戻ってきたら boot() が自動でログインを完了する
+            try { if (inv) sessionStorage.setItem('pendingInvite', inv); } catch (e) {}
+            window.liff.login({ redirectUri: location.origin + '/' });
+            return;
+          }
           location.href = '/api/auth/line/login' + (inv ? '?invite=' + encodeURIComponent(inv) : '');
         } else if (act === 'back') {
           c.screen = (c.screen === 'checkinSuccess' || c.screen === 'history' || c.screen === 'qr' || c.screen === 'invites') ? 'home' : 'login';
           render();
         } else if (act === 'logout') {
           await api('POST', '/api/auth/member/logout').catch(function () {});
+          // 外部ブラウザでは LIFF 側のログインも消す（LINE アプリ内では次回開いたとき再び自動ログインになる）
+          if (liffReady && window.liff.isLoggedIn() && !window.liff.isInClient()) window.liff.logout();
           state.session.member = null;
           state.customer = { screen: 'login', summary: null, transactions: null, loading: false, lastCheckin: null, loginError: '' };
           render();
@@ -644,9 +692,9 @@
           render();
           try { c.invites = await api('GET', '/api/me/invites'); } catch (e) { toast(e.message, 'err'); }
           render();
-        } else if (act === 'copycode' || act === 'copylink') {
+        } else if (act === 'copylink') {
           var kk = c.invites && c.invites.codes[parseInt(el.getAttribute('data-i'), 10)];
-          if (kk) copyText(act === 'copycode' ? kk.code : kk.shareUrl, act === 'copycode' ? '招待コードをコピーしました' : '招待リンクをコピーしました。お友達に送りましょう');
+          if (kk) copyText(kk.shareUrl, '招待リンクをコピーしました。LINEでお友達に送りましょう');
         } else if (act === 'redeemfriend') {
           var fc = (c.friendCode || '').replace(/[^A-Za-z0-9]/g, '');
           if (fc.length !== 8) { toast('招待コードは英数字8文字です', 'err'); return; }
@@ -954,7 +1002,7 @@
     var curStamps = sel ? (sel.stamps || 0) : 0;
     var stampText = !sel ? '—' : useTicket
       ? '無料券を使用（スタンプなし）'
-      : (curStamps + 1 >= STAMP_GOAL ? '+1 → ' + STAMP_GOAL + '個達成！無料券を進呈' : '+1（' + curStamps + ' → ' + (curStamps + 1) + ' / ' + STAMP_GOAL + '）');
+      : (curStamps + 1 >= STAMP_GOAL ? '+1 → ' + STAMP_GOAL + '個達成！' + fmt(STAMP_REWARD) + ' ポイント進呈' : '+1（' + curStamps + ' → ' + (curStamps + 1) + ' / ' + STAMP_GOAL + '）');
 
     var sc = s.scan;
     var memberPart;
@@ -1070,7 +1118,7 @@
             s.lastInvite = { memberName: res.member.displayName, code: res.inviteCode, url: res.inviteShareUrl, inviterBonus: res.inviterBonus, inviteeBonus: res.inviteeBonus, redeemRate: res.redeemRate };
             var rt = res.transaction;
             toast(res.member.displayName + ' さん：' +
-              (rt.freeTicketUsed ? '無料券を使用しました' : 'スタンプ +' + rt.stampsAdded + (rt.ticketsEarned ? '、' + res.stampGoal + '個達成で無料券を進呈しました' : '（' + res.member.stamps + ' / ' + res.stampGoal + '）')) +
+              (rt.freeTicketUsed ? '無料券を使用しました' : 'スタンプ +' + rt.stampsAdded + (rt.stampRewardPoints ? '、' + res.stampGoal + '個達成で ' + fmt(rt.stampRewardPoints) + ' ポイントを進呈しました' : '（' + res.member.stamps + ' / ' + res.stampGoal + '）')) +
               (rt.redeemedPoints > 0 ? '、ポイント利用 ' + fmt(rt.discount) + ' 円' : '') + '。会計が完了しました！');
             s.selectedMember = null;
             s.checkoutForm = { orderAmount: '', redeemOn: false, redeemPoints: 0, useTicket: false };
@@ -1281,7 +1329,7 @@
       ruleItem('redeemRate', 'ポイント換算レート', '', r.redeemRate, 'ポイント = 1 円分') +
       rangeItem('maxRedeemPercent', '1回の利用上限', r.maxRedeemPercent, '%（お会計金額）', 0, 100) +
       '</div>' +
-      '<div class="section-sub" style="margin:0;">スタンプのルール：ご利用1回につきスタンプ1個（ご利用金額によるポイント付与はありません）。' + STAMP_GOAL + '個たまると無料券1枚を進呈し、次回のお会計が全額無料になります。無料券を使ったお会計ではスタンプは押されません。</div>' +
+      '<div class="section-sub" style="margin:0;">スタンプのルール：ご利用1回につきスタンプ1個（ご利用金額によるポイント付与はありません）。' + STAMP_GOAL + '個たまると ' + fmt(STAMP_REWARD) + ' ポイントを進呈し、スタンプは0からやり直しです。（以前に発行済みの無料券はレジで引き続き使えます。無料券を使ったお会計ではスタンプは押されません）</div>' +
       '<div class="section-sub" style="margin:0;">チェックインのルール：お客様が1日1回スマホでチェックインします。連続 5 日目・10 日目は追加ポイントがあり、10 日目の付与後は1日目からやり直しです。1日でも休むとやり直しになります。ボーナスを 0 にすると、その段階のボーナスは無効になります。</div>' +
       '<div class="autosave" id="autosaveMsg">' + (state.admin.autosaveMsg ? svg('check') + ' ' + esc(state.admin.autosaveMsg) : '') + '</div>' +
       '</div>';

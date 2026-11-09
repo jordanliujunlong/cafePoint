@@ -36,6 +36,7 @@ async function summary(req, res) {
     stamps: member.stamps,
     freeTickets: member.freeTickets,
     stampGoal: stampService.STAMP_GOAL,
+    stampReward: stampService.STAMP_REWARD_POINTS,
     checkedInToday: member.lastCheckinDate === today,
     streak,
     cycleDays: checkinService.CYCLE_DAYS,
@@ -174,7 +175,7 @@ async function invites(req, res) {
     redeemRate: rules.redeemRate,
     codes: rows.map((r) => ({
       code: inviteService.formatCode(r.code),
-      shareUrl: `${config.appBaseUrl}/?invite=${r.code}`,
+      shareUrl: config.customerUrl(`invite=${r.code}`),
       createdAt: r.createdAt,
       used: !!r.usedById,
       usedAt: r.usedAt,

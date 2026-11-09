@@ -51,4 +51,24 @@ async function fetchProfile(accessToken) {
   return res.json(); // { userId, displayName, pictureUrl }
 }
 
-module.exports = { buildState, buildAuthorizeUrl, exchangeCodeForToken, fetchProfile };
+const VERIFY_URL = 'https://api.line.me/oauth2/v2.1/verify';
+
+/**
+ * LIFF 的 ID token 交给 LINE 验证（会一并确认签发对象是我们的 LINE Login 渠道、且未过期）。
+ * 回传与 fetchProfile 相同形状的 { userId, displayName, pictureUrl }。
+ */
+async function verifyIdToken(idToken) {
+  const res = await fetch(VERIFY_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ id_token: idToken, client_id: config.line.channelId })
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`LINE id_token verify failed (${res.status}): ${text}`);
+  }
+  const p = await res.json(); // { sub, name, picture, aud, exp, ... }
+  return { userId: p.sub, displayName: p.name || 'LINEユーザー', pictureUrl: p.picture || null };
+}
+
+module.exports = { buildState, buildAuthorizeUrl, exchangeCodeForToken, fetchProfile, verifyIdToken };

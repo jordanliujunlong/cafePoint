@@ -53,7 +53,12 @@ function renderIndexHtml() {
   return fs
     .readFileSync(path.join(publicDir, 'index.html'), 'utf8')
     .replace('href="/styles.css"', `href="/styles.css?v=${stamp('styles.css')}"`)
-    .replace('src="/app.js"', `src="/app.js?v=${stamp('app.js')}"`);
+    .replace(
+      '<script src="/app.js"',
+      // フロントで必要な設定（LIFF ID）を渡す。</script> などを埋め込まれないよう < はエスケープ
+      `<script>window.APP_CONFIG = ${JSON.stringify({ liffId: config.line.liffId }).replace(/</g, '\\u003c')};</script>\n  ` +
+        `<script src="/app.js?v=${stamp('app.js')}"`
+    );
 }
 
 app.use(express.static(publicDir, { index: false }));

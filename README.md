@@ -151,6 +151,7 @@ git commit -m "本町咖啡积分系统"
 | `JWT_SECRET` | 一长串随机字符，正式环境务必换成自己产生的 |
 | `STORE_TZ` | 门店时区，预设 `Asia/Taipei` |
 | `LINE_CHANNEL_ID` / `LINE_CHANNEL_SECRET` | 第二节申请到的值 |
+| `LIFF_ID` | （选填）LIFF 应用的 ID。设定后顾客在 LINE 里打开会自动登入（不出现授权画面）；留空则使用一般 LINE Login。见下方「LIFF 设定」 |
 | `SEED_ADMIN_USERNAME` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_NAME` | 第一个管理员帐号，之后可以在后台改密码或新增其他帐号 |
 | `NODE_ENV` | 填 `production` |
 | `PORT` | 不用设，Railway 会自动注入 |
@@ -205,6 +206,15 @@ Railway 服务部署起来之后，数据库还是空的，需要从你自己的
 
 打开 `https://你的Railway网域`，三个角色都可以开始用了。之后每次 `git push`，
 Railway 会自动重新部署（也可以在 Settings 关掉自动部署，改成手动触发）。
+
+### LIFF 设定（选用，推荐）
+
+1. LINE Developers → 你的 **LINE Login 渠道** → **LIFF** 分页 → **新增**。
+2. Size 选 **Full**；Endpoint URL 填 `https://你的Railway网域/`；Scope 勾选 **openid** 和 **profile**。
+3. 建立后复制 **LIFF ID**（样子像 `1234567890-AbCdEfGh`），填进 Railway 的环境变量 `LIFF_ID`。
+4. 官方帐号的富菜单连结改成 **LIFF URL**：`https://liff.line.me/你的LIFF_ID`。
+
+LIFF 建在原本的 LINE Login 渠道底下，LINE 的 userId 不会变，旧会员资料会照常沿用。
 
 ### 自订网域（选用）
 

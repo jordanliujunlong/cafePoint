@@ -51,6 +51,19 @@ async function lineLoginCallback(req, res) {
   const inviteCookie = req.cookies && req.cookies.invite_code;
   res.clearCookie('invite_code', { path: '/' });
 
+  const { member, inviteResult, inviteBonus } = await signInLineUser(profile, inviteCookie);
+  setMemberCookie(res, member);
+  if (inviteResult) {
+    return res.redirect(`/?invite_result=${inviteResult}&invite_bonus=${inviteBonus}`);
+  }
+  res.redirect('/');
+}
+
+/**
+ * LINE 的使用者（userId / 名称 / 头像）-> 找出或建立会员，并处理带来的邀请码。
+ * 一般 LINE Login 与 LIFF 登入共用。
+ */
+async function signInLineUser(profile, rawInvite) {
   let member = await prisma.member.findUnique({ where: { lineUserId: profile.userId } });
   if (member) {
     member = await prisma.member.update({
@@ -83,19 +96,40 @@ async function lineLoginCallback(req, res) {
   // 邀请码：新会员、老会员都可以用（每人一生只能用一次，不能用自己的码）。
   let inviteResult = '';
   let inviteBonus = 0;
-  if (inviteCookie) {
+  if (rawInvite) {
     const rules = await pointsService.getRules();
-    const r = await prisma.$transaction((tx) => inviteService.redeemInvite(tx, inviteCookie, member, rules));
+    let r;
+    try {
+      r = await prisma.$transaction((tx) => inviteService.redeemInvite(tx, rawInvite, member, rules));
+    } catch (e) {
+      if (e && e.code === 'P2002') r = { ok: false, reason: 'already' }; // 同时送出两组码
+      else throw e;
+    }
     inviteResult = r.ok ? 'ok' : r.reason;
     inviteBonus = r.ok ? r.inviteeBonus : 0;
   }
+  return { member, inviteResult, inviteBonus };
+}
 
+function setMemberCookie(res, member) {
   const token = jwt.sign({ sub: member.id, type: 'member' }, '30d');
   res.cookie('member_jwt', token, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
-  if (inviteResult) {
-    return res.redirect(`/?invite_result=${inviteResult}&invite_bonus=${inviteBonus}`);
+}
+
+// ---------- LIFF 登入（在 LINE App 里开启时自动登入，不会出现授权画面）----------
+// 前端用 liff.getIDToken() 拿到 ID token 送过来，这里向 LINE 验证后登入。
+async function liffLogin(req, res) {
+  const { idToken, invite } = req.body || {};
+  if (!idToken) throw new HttpError(400, 'LINEの認証情報がありません。もう一度お試しください');
+  let profile;
+  try {
+    profile = await lineService.verifyIdToken(idToken);
+  } catch (e) {
+    throw new HttpError(401, 'LINEの認証に失敗しました。LINEアプリを開き直してもう一度お試しください');
   }
-  res.redirect('/');
+  const { member, inviteResult, inviteBonus } = await signInLineUser(profile, invite);
+  setMemberCookie(res, member);
+  res.json({ ok: true, inviteResult, inviteBonus });
 }
 
 // 登入页输入邀请码后，先问一下这组码能不能用（不会透露是谁的码）。
@@ -175,6 +209,7 @@ async function me(req, res) {
 
 module.exports = {
   inviteCheck,
+  liffLogin,
   lineLoginStart,
   lineLoginCallback,
   memberLogout,

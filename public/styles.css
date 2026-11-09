@@ -550,7 +550,7 @@
   .stamp-card .stc-count small{font-size:13px; color:var(--ink-muted); font-weight:700; margin-left:2px;}
   .stamp-grid{display:grid; grid-template-columns:repeat(5,1fr); gap:8px;}
   .stamp-cell{aspect-ratio:1/1; border:1.5px solid var(--border-strong); border-radius:12px; background:var(--surface-2); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; color:var(--ink-muted); font-size:15px; font-weight:700;}
-  .stamp-cell.goal{border-color:var(--gold); background:var(--gold-soft); color:var(--gold-ink); font-size:10.5px; letter-spacing:.06em;}
+  .stamp-cell.goal{border-color:var(--gold); background:var(--gold-soft); color:var(--gold-ink); font-size:10.5px; letter-spacing:0;}
   .stamp-cell.goal svg{width:18px; height:18px;}
   .stamp-cell.on{border-color:var(--crit); background:var(--crit-soft);}
   .stamp-mark{width:78%; height:78%; border-radius:50%; border:2.5px solid var(--crit); color:var(--crit); display:flex; align-items:center; justify-content:center; transform:rotate(-12deg);}
