@@ -125,7 +125,20 @@ async function liffLogin(req, res) {
   try {
     profile = await lineService.verifyIdToken(idToken);
   } catch (e) {
-    throw new HttpError(401, 'LINEの認証に失敗しました。LINEアプリを開き直してもう一度お試しください');
+    // LINE 側の理由（期限切れ / チャネル不一致など）を Railway のログに残す
+    console.warn('[liff] ' + e.message);
+    const msg = e.message || '';
+    if (/expired/i.test(msg)) {
+      throw new HttpError(401, 'ログインの有効期限が切れました。もう一度ログインしてください', { reason: 'expired' });
+    }
+    if (/audience|channel|client_id/i.test(msg)) {
+      throw new HttpError(
+        401,
+        'LINEの設定に誤りがあります（LIFFアプリのチャネルとサーバーの LINE_CHANNEL_ID が一致しません）。お店にお知らせください',
+        { reason: 'config' }
+      );
+    }
+    throw new HttpError(401, 'LINEの認証に失敗しました。LINEアプリを開き直してもう一度お試しください', { reason: 'invalid' });
   }
   const { member, inviteResult, inviteBonus } = await signInLineUser(profile, invite);
   setMemberCookie(res, member);

@@ -104,6 +104,7 @@
     if (!res.ok) {
       var err = new Error((data && data.error) || ('リクエストに失敗しました（' + res.status + '）'));
       err.status = res.status;
+      err.details = data && data.details;
       throw err;
     }
     return data;
@@ -252,7 +253,23 @@
         state.customer.inviteStatus = null;
         if (r.inviteResult) inviteNotice = inviteNoticeFor(r.inviteResult, r.inviteBonus);
         state.session.member = (await api('GET', '/api/auth/me')).member;
+        try { sessionStorage.removeItem('liffRetry'); } catch (e2) { /* ignore */ }
       } catch (e) {
+        // 保存されていた ID トークンが古い／無効 → 1回だけトークンを取り直して自動で再ログイン
+        var reason = e.details && e.details.reason;
+        var retried = false;
+        try { retried = sessionStorage.getItem('liffRetry') === '1'; } catch (e2) { /* ignore */ }
+        if (e.status === 401 && reason !== 'config' && !retried) {
+          try { sessionStorage.setItem('liffRetry', '1'); } catch (e2) { /* ignore */ }
+          var inv = (state.customer.inviteInput || '').replace(/[^A-Za-z0-9]/g, '');
+          if (inv) { try { sessionStorage.setItem('pendingInvite', inv); } catch (e2) { /* ignore */ } }
+          window.liff.logout();
+          if (window.liff.isInClient()) location.reload();
+          else window.liff.login({ redirectUri: location.origin + '/' });
+          return;
+        }
+        try { sessionStorage.removeItem('liffRetry'); } catch (e2) { /* ignore */ }
+        if (window.liff.isLoggedIn()) window.liff.logout();
         state.customer.loginError = e.message;
       }
     }
