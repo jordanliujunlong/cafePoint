@@ -603,7 +603,7 @@
       : '';
     var btnLabel = s.checkedInToday ? '本日チェックイン済み' : (c.busy ? '処理中…' : 'チェックイン +' + s.rules.checkinPoints + ' ポイント');
     return '<div class="card streak-card">' +
-      '<div class="sc-head"><div><b>毎日チェックイン</b><span>連続 ' + streak + ' 日' + (streak ? '' : ' · 今日から開始') + '</span></div></div>' +
+      '<div class="sc-head"><div><b>毎日チェックイン</b></div></div>' +
       '<div class="rule-tip">' + svg('gift') + '<span>1日 <b class="num">' + fmt(yenOf(s.rules.checkinPoints, s.rules.redeemRate)) + '円</b> Get！5日目・' + cycle + '日目 さらにボーナス贈呈！</span></div>' +
       '<div class="sdots">' + dots + '</div>' +
       (hint ? '<div class="sc-hint">' + svg('zap') + '<span>' + esc(hint) + '</span></div>' : '') +
