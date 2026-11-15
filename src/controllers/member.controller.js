@@ -173,6 +173,8 @@ async function invites(req, res) {
     inviterBonus: rules.inviterBonus,
     inviteeBonus: rules.inviteeBonus,
     redeemRate: rules.redeemRate,
+    // あなた専用の紹介リンク（何人に送ってもOK・お友達はそれぞれ1回）
+    refUrl: config.customerUrl(`ref=${req.member.id}`),
     codes: rows.map((r) => ({
       code: inviteService.formatCode(r.code),
       shareUrl: config.customerUrl(`invite=${r.code}`),
@@ -185,9 +187,9 @@ async function invites(req, res) {
 }
 
 const REDEEM_ERRORS = {
-  invalid: '招待コードが見つかりません。もう一度ご確認ください',
+  invalid: '招待コード（紹介リンク）が見つかりません。もう一度ご確認ください',
   used: 'この招待コードはすでに使用されています',
-  self: 'ご自身の招待コードは使用できません',
+  self: 'ご自身の招待コード・紹介リンクは使用できません',
   already: '招待コードはお一人様1回までです。すでにご利用済みです'
 };
 
@@ -198,7 +200,12 @@ async function redeemInvite(req, res) {
   const rules = await pointsService.getRules();
   let r;
   try {
-    r = await prisma.$transaction((tx) => inviteService.redeemInvite(tx, req.body && req.body.code, member, rules));
+    const body = req.body || {};
+    r = await prisma.$transaction((tx) =>
+      body.ref && !body.code
+        ? inviteService.redeemReferral(tx, body.ref, member, rules)
+        : inviteService.redeemInvite(tx, body.code, member, rules)
+    );
   } catch (e) {
     // usedById 唯一约束：同一人同时送出两组码时，只有一组会成功
     if (e && e.code === 'P2002') r = { ok: false, reason: 'already' };

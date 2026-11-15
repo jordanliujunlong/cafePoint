@@ -135,7 +135,7 @@
     booted: false,
     role: PATH === '/admin' ? 'admin' : (STAFF_SITE ? 'staff' : 'customer'),
 
-    customer: { screen: 'login', summary: null, transactions: null, loading: false, busy: false, lastCheckin: null, qr: null, qrError: '', loginError: '', inviteInput: '', inviteStatus: null, invites: null, friendCode: '', redeemBusy: false },
+    customer: { screen: 'login', summary: null, transactions: null, loading: false, busy: false, lastCheckin: null, qr: null, qrError: '', loginError: '', inviteInput: '', inviteStatus: null, refInput: '', invites: null, friendCode: '', redeemBusy: false },
 
     staffAuth: { form: { username: '', password: '' }, error: '', busy: false },
     staff: {
@@ -203,8 +203,12 @@
       return false;
     }
   }
-  function readPendingInvite() {
-    try { var v = sessionStorage.getItem('pendingInvite') || ''; sessionStorage.removeItem('pendingInvite'); return v; } catch (e) { return ''; }
+  function readPendingInvite() { return readPending('pendingInvite'); }
+  function readPending(key) {
+    try { var v = sessionStorage.getItem(key) || ''; sessionStorage.removeItem(key); return v; } catch (e) { return ''; }
+  }
+  function savePending(key, v) {
+    try { if (v) sessionStorage.setItem(key, v); } catch (e) { /* ignore */ }
   }
   function inviteNoticeFor(ir, bonus) {
     return ir === 'ok' ? { msg: '招待コードを適用しました！紹介ボーナス +' + bonus + ' ポイントを付与しました', kind: 'ok' }
@@ -229,10 +233,14 @@
     if (inviteParam) {
       state.customer.inviteInput = inviteParam.toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^(.{4})(.+)$/, '$1-$2');
     }
+    var refParam = params.get('ref') || readPending('pendingRef');
+    if (refParam && !inviteParam) state.customer.refInput = refParam.replace(/[^A-Za-z0-9]/g, '');
+    var fromLink = !!(inviteParam || state.customer.refInput); // 招待コード／紹介リンクから開いた
+    var appliedAtLogin = false;
     if (params.get('invite_result')) {
       inviteNotice = inviteNoticeFor(params.get('invite_result'), parseInt(params.get('invite_bonus'), 10) || 0);
     }
-    if (params.get('login_error') || params.get('invite') || params.get('invite_result') || params.get('code')) {
+    if (params.get('login_error') || params.get('invite') || params.get('ref') || params.get('invite_result') || params.get('code')) {
       history.replaceState({}, '', location.pathname);
     }
     try {
@@ -247,9 +255,12 @@
       try {
         var r = await api('POST', '/api/auth/liff', {
           idToken: window.liff.getIDToken(),
-          invite: (state.customer.inviteInput || '').replace(/[^A-Za-z0-9]/g, '')
+          invite: (state.customer.inviteInput || '').replace(/[^A-Za-z0-9]/g, ''),
+          ref: state.customer.refInput || ''
         });
+        appliedAtLogin = true;
         state.customer.inviteInput = '';
+        state.customer.refInput = '';
         state.customer.inviteStatus = null;
         if (r.inviteResult) inviteNotice = inviteNoticeFor(r.inviteResult, r.inviteBonus);
         state.session.member = (await api('GET', '/api/auth/me')).member;
@@ -262,7 +273,8 @@
         if (e.status === 401 && reason !== 'config' && !retried) {
           try { sessionStorage.setItem('liffRetry', '1'); } catch (e2) { /* ignore */ }
           var inv = (state.customer.inviteInput || '').replace(/[^A-Za-z0-9]/g, '');
-          if (inv) { try { sessionStorage.setItem('pendingInvite', inv); } catch (e2) { /* ignore */ } }
+          savePending('pendingInvite', inv);
+          savePending('pendingRef', state.customer.refInput);
           window.liff.logout();
           if (window.liff.isInClient()) location.reload();
           else window.liff.login({ redirectUri: location.origin + '/' });
@@ -272,6 +284,18 @@
         if (window.liff.isLoggedIn()) window.liff.logout();
         state.customer.loginError = e.message;
       }
+    }
+    // すでにログイン済みのお友達が招待リンクを開いた場合も、ここでボーナスを適用する
+    if (!STAFF_SITE && state.session.member && fromLink && !appliedAtLogin) {
+      var invCode = (state.customer.inviteInput || '').replace(/[^A-Za-z0-9]/g, '');
+      try {
+        var rr = await api('POST', '/api/me/invite/redeem', invCode ? { code: invCode } : { ref: state.customer.refInput });
+        inviteNotice = inviteNoticeFor('ok', rr.inviteeBonus);
+      } catch (e) {
+        inviteNotice = { msg: e.message, kind: 'err' };
+      }
+      state.customer.inviteInput = '';
+      state.customer.refInput = '';
     }
     state.customer.screen = state.session.member ? 'home' : 'login';
     state.booted = true;
@@ -330,7 +354,25 @@
     render();
   }
 
+  // LINE でお友達に送る：LIFF の shareTargetPicker（友だち選択画面）→ 使えなければ LINE の共有 URL
+  function shareViaLine(text) {
+    function openShareUrl() { location.href = 'https://line.me/R/share?text=' + encodeURIComponent(text); }
+    if (liffReady && window.liff.isApiAvailable && window.liff.isApiAvailable('shareTargetPicker')) {
+      window.liff.shareTargetPicker([{ type: 'text', text: text }]).then(function (r) {
+        if (r) toast('お友達に送りました！');
+      }, openShareUrl);
+    } else openShareUrl();
+  }
+
   function copyText(text, okMsg) {
+    // LINE アプリ内ブラウザでは clipboard API が使えないことが多いので、まず同期コピーを試す
+    var ta0 = document.createElement('textarea');
+    ta0.value = text; ta0.setAttribute('readonly', ''); ta0.style.position = 'fixed'; ta0.style.opacity = '0';
+    document.body.appendChild(ta0); ta0.select(); ta0.setSelectionRange(0, text.length);
+    var ok0 = false;
+    try { ok0 = document.execCommand('copy'); } catch (e) { ok0 = false; }
+    ta0.remove();
+    if (ok0) { toast(okMsg); return; }
     function fallback() {
       var ta = document.createElement('textarea');
       ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
@@ -338,7 +380,9 @@
       var ok = false;
       try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
       ta.remove();
-      toast(ok ? okMsg : 'コピーに失敗しました。文字を長押ししてコピーしてください', ok ? 'ok' : 'err');
+      toast(ok ? okMsg : 'コピーできませんでした。リンク欄を長押ししてコピーするか「LINEで送る」をお使いください', ok ? 'ok' : 'err');
+      var box = document.getElementById('refurl');
+      if (!ok && box) { box.focus(); box.select(); }
     }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(function () { toast(okMsg); }, fallback);
@@ -439,7 +483,8 @@
         '<p>ご利用ごとにスタンプが貯まり、' + STAMP_GOAL + '個で ' + fmt(STAMP_REWARD) + ' ポイントをプレゼント。毎日のチェックインでポイントも貯まり、お会計に使えます。</p>' +
         '</div>' +
         (c.loginError ? '<div class="banner crit">' + svg('alert') + '<span>' + esc(c.loginError) + '</span></div>' : '') +
-        '<div class="invite-box"><label for="invitecode">招待コードをお持ちですか？（任意・お一人様1回まで）</label>' +
+        (c.refInput ? '<div class="banner good">' + svg('gift') + '<span>お友達からの紹介リンクです！LINEで続けると紹介ボーナスがもらえます</span></div>' : '') +
+        '<div class="invite-box"' + (c.refInput ? ' style="display:none"' : '') + '><label for="invitecode">招待コードをお持ちですか？（任意・お一人様1回まで）</label>' +
         '<input class="input" id="invitecode" autocomplete="off" autocapitalize="characters" maxlength="9" placeholder="例：K7M4-Q9XT" value="' + esc(c.inviteInput) + '">' +
         '<div class="invite-status ' + (c.inviteStatus ? c.inviteStatus.kind : '') + '" id="invitestatus">' + esc(c.inviteStatus ? c.inviteStatus.text : '') + '</div></div>' +
         '<button class="btn line block" data-act="linelogin" style="border:1px solid var(--border);">' + svg('bowl') + ' LINEアカウントで続ける</button>' +
@@ -466,7 +511,7 @@
           '<div class="tx"><b>お友達紹介コード</b>' +
           '<div class="ic-rewards"><span class="rw-pill">あなた <b class="num">' + fmt(yenOf(s.rules.inviterBonus, s.rules.redeemRate)) + '円分</b></span>' +
           '<span class="rw-pill">お友達 <b class="num">' + fmt(yenOf(s.rules.inviteeBonus, s.rules.redeemRate)) + '円分</b></span></div>' +
-          '<span>' + (s.unusedInvites ? 'お渡しできる招待コードが ' + s.unusedInvites + ' 件あります' : 'ご利用後にスタッフが招待コードをお渡しします') + '</span></div>' +
+          '<span>あなた専用の紹介リンクをLINEでお友達に送ろう</span></div>' +
           svg('chevronRight', 'chev') + '</button>' +
           '<div class="stat1"><div class="t">今月の獲得ポイント</div><div class="v num">' + fmt(s.monthEarned) + ' ポイント</div></div>' +
           '<div>' +
@@ -504,6 +549,13 @@
           '<div class="rw-head">' + svg('gift') + '<b>紹介が成立すると、ふたりともうれしい！</b></div>' +
           '<div class="rw-grid">' + rewardTile('あなたに', iv.inviterBonus) + '<div class="rw-plus">＋</div>' + rewardTile('お友達に', iv.inviteeBonus) + '</div>' +
           '</div>' : '') +
+        (iv && iv.refUrl
+          ? '<div class="ref-box"><b>あなた専用の紹介リンク</b>' +
+            '<span>何人に送ってもOK！お友達がリンクを開いてLINEでログインすると、ふたりにボーナス（お友達はお一人様1回まで）</span>' +
+            '<input class="input ref-url" id="refurl" readonly value="' + esc(iv.refUrl) + '">' +
+            '<div class="ref-btns"><button class="btn primary" data-act="sharelink">' + svg('gift') + ' LINEで送る</button>' +
+            '<button class="btn ghost" data-act="copyref">リンクをコピー</button></div></div>'
+          : '') +
         (iv && iv.canRedeem
           ? '<div class="redeem-box"><b>お友達から招待コードをもらいましたか？</b>' +
             '<span>入力すると あなたに <b class="num">+' + fmt(yenOf(iv.inviteeBonus, iv.redeemRate)) + '円分</b>、お友達に <b class="num">+' + fmt(yenOf(iv.inviterBonus, iv.redeemRate)) + '円分</b>（お一人様1回まで）</span>' +
@@ -685,11 +737,12 @@
           var inv = (c.inviteInput || '').replace(/[^A-Za-z0-9]/g, '');
           if (liffReady) {
             // LIFF：LINE のログイン画面から戻ってきたら boot() が自動でログインを完了する
-            try { if (inv) sessionStorage.setItem('pendingInvite', inv); } catch (e) {}
+            savePending('pendingInvite', inv);
+            if (!inv) savePending('pendingRef', c.refInput);
             window.liff.login({ redirectUri: location.origin + '/' });
             return;
           }
-          location.href = '/api/auth/line/login' + (inv ? '?invite=' + encodeURIComponent(inv) : '');
+          location.href = '/api/auth/line/login' + (inv ? '?invite=' + encodeURIComponent(inv) : (c.refInput ? '?ref=' + encodeURIComponent(c.refInput) : ''));
         } else if (act === 'back') {
           c.screen = (c.screen === 'checkinSuccess' || c.screen === 'history' || c.screen === 'qr' || c.screen === 'invites') ? 'home' : 'login';
           render();
@@ -709,6 +762,11 @@
           render();
           try { c.invites = await api('GET', '/api/me/invites'); } catch (e) { toast(e.message, 'err'); }
           render();
+        } else if (act === 'sharelink' || act === 'copyref') {
+          if (!c.invites || !c.invites.refUrl) return;
+          var iv2 = c.invites;
+          if (act === 'copyref') { copyText(iv2.refUrl, '紹介リンクをコピーしました。お友達に送りましょう'); return; }
+          shareViaLine('スーパー麻辣湯の会員カードに登録すると ' + fmt(yenOf(iv2.inviteeBonus, iv2.redeemRate)) + '円分のポイントがもらえます！こちらのリンクから\n' + iv2.refUrl);
         } else if (act === 'copylink') {
           var kk = c.invites && c.invites.codes[parseInt(el.getAttribute('data-i'), 10)];
           if (kk) copyText(kk.shareUrl, '招待リンクをコピーしました。LINEでお友達に送りましょう');

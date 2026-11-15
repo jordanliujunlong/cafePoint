@@ -29,6 +29,9 @@ function lineLoginStart(req, res) {
   const invite = inviteService.normalizeCode(req.query.invite);
   if (invite) res.cookie('invite_code', invite, { ...cookieBase, maxAge: 30 * 60 * 1000 });
   else res.clearCookie('invite_code', { path: '/' });
+  const ref = inviteService.normalizeRef(req.query.ref);
+  if (ref) res.cookie('invite_ref', ref, { ...cookieBase, maxAge: 30 * 60 * 1000 });
+  else res.clearCookie('invite_ref', { path: '/' });
   res.redirect(lineService.buildAuthorizeUrl(state));
 }
 
@@ -50,8 +53,10 @@ async function lineLoginCallback(req, res) {
 
   const inviteCookie = req.cookies && req.cookies.invite_code;
   res.clearCookie('invite_code', { path: '/' });
+  const refCookie = req.cookies && req.cookies.invite_ref;
+  res.clearCookie('invite_ref', { path: '/' });
 
-  const { member, inviteResult, inviteBonus } = await signInLineUser(profile, inviteCookie);
+  const { member, inviteResult, inviteBonus } = await signInLineUser(profile, inviteCookie, refCookie);
   setMemberCookie(res, member);
   if (inviteResult) {
     return res.redirect(`/?invite_result=${inviteResult}&invite_bonus=${inviteBonus}`);
@@ -63,7 +68,7 @@ async function lineLoginCallback(req, res) {
  * LINE 的使用者（userId / 名称 / 头像）-> 找出或建立会员，并处理带来的邀请码。
  * 一般 LINE Login 与 LIFF 登入共用。
  */
-async function signInLineUser(profile, rawInvite) {
+async function signInLineUser(profile, rawInvite, rawRef) {
   let member = await prisma.member.findUnique({ where: { lineUserId: profile.userId } });
   if (member) {
     member = await prisma.member.update({
@@ -96,11 +101,15 @@ async function signInLineUser(profile, rawInvite) {
   // 邀请码：新会员、老会员都可以用（每人一生只能用一次，不能用自己的码）。
   let inviteResult = '';
   let inviteBonus = 0;
-  if (rawInvite) {
+  if (rawInvite || rawRef) {
     const rules = await pointsService.getRules();
     let r;
     try {
-      r = await prisma.$transaction((tx) => inviteService.redeemInvite(tx, rawInvite, member, rules));
+      r = await prisma.$transaction((tx) =>
+        rawInvite
+          ? inviteService.redeemInvite(tx, rawInvite, member, rules)
+          : inviteService.redeemReferral(tx, rawRef, member, rules)
+      );
     } catch (e) {
       if (e && e.code === 'P2002') r = { ok: false, reason: 'already' }; // 同时送出两组码
       else throw e;
@@ -119,7 +128,7 @@ function setMemberCookie(res, member) {
 // ---------- LIFF 登入（在 LINE App 里开启时自动登入，不会出现授权画面）----------
 // 前端用 liff.getIDToken() 拿到 ID token 送过来，这里向 LINE 验证后登入。
 async function liffLogin(req, res) {
-  const { idToken, invite } = req.body || {};
+  const { idToken, invite, ref } = req.body || {};
   if (!idToken) throw new HttpError(400, 'LINEの認証情報がありません。もう一度お試しください');
   let profile;
   try {
@@ -140,7 +149,7 @@ async function liffLogin(req, res) {
     }
     throw new HttpError(401, 'LINEの認証に失敗しました。LINEアプリを開き直してもう一度お試しください', { reason: 'invalid' });
   }
-  const { member, inviteResult, inviteBonus } = await signInLineUser(profile, invite);
+  const { member, inviteResult, inviteBonus } = await signInLineUser(profile, invite, ref);
   setMemberCookie(res, member);
   res.json({ ok: true, inviteResult, inviteBonus });
 }

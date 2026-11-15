@@ -580,3 +580,11 @@
   /* ---------- レジ：無料券 ---------- */
   .ticket-row > span{display:inline-flex; align-items:center; gap:6px; color:var(--gold-ink);}
   .ticket-row svg{width:16px; height:16px;}
+
+  /* あなた専用の紹介リンク */
+  .ref-box{display:flex; flex-direction:column; gap:8px; padding:14px; border-radius:var(--radius-m, 12px); border:1px solid var(--border); background:var(--surface, #fff);}
+  .ref-box > b{font-size:14px;}
+  .ref-box > span{font-size:12px; color:var(--ink-muted); line-height:1.5;}
+  .ref-box .ref-url{font-size:12px; color:var(--ink-muted);}
+  .ref-box .ref-btns{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+  .ref-box .ref-btns .btn svg{width:16px; height:16px;}

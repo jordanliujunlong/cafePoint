@@ -58,6 +58,40 @@ async function redeemInvite(tx, rawCode, newMember, rules) {
   });
   if (claimed.count === 0) return { ok: false, reason: 'used' };
 
+  return awardBoth(tx, invite.inviterId, newMember, rules, `お友達紹介ボーナス（${newMember.displayName}さんがコードを使用）`);
+}
+
+/** 会员专属的「紹介リンク」：?ref=<会员ID>。可以发给很多朋友，每位朋友（一生一次）点开登入就成立。 */
+function normalizeRef(input) {
+  const v = String(input || '').trim();
+  return /^[a-z0-9]{20,40}$/i.test(v) ? v : null;
+}
+
+/**
+ * 透过紹介リンク成立邀请：替邀请人产生一组码并直接标记为这位朋友已使用（沿用「一人一生一次」的唯一约束），
+ * 双方各得奖励。必须在 prisma.$transaction 的 tx 里呼叫。回传格式同 redeemInvite。
+ */
+async function redeemReferral(tx, rawRef, newMember, rules) {
+  const ref = normalizeRef(rawRef);
+  if (!ref) return { ok: false, reason: 'invalid' };
+  if (ref === newMember.id) return { ok: false, reason: 'self' };
+  const inviter = await tx.member.findUnique({ where: { id: ref }, select: { id: true } });
+  if (!inviter) return { ok: false, reason: 'invalid' };
+  const alreadyUsed = await tx.inviteCode.findUnique({ where: { usedById: newMember.id } });
+  if (alreadyUsed) return { ok: false, reason: 'already' };
+
+  const issued = await issueInviteCode(tx, inviter.id, null);
+  const claimed = await tx.inviteCode.updateMany({
+    where: { id: issued.id, usedById: null },
+    data: { usedById: newMember.id, usedAt: new Date() }
+  });
+  if (claimed.count === 0) return { ok: false, reason: 'used' };
+
+  return awardBoth(tx, inviter.id, newMember, rules, `お友達紹介ボーナス（${newMember.displayName}さんが紹介リンクから参加）`);
+}
+
+async function awardBoth(tx, inviterId, newMember, rules, inviterNote) {
+  const invite = { inviterId };
   const inviterBonus = Math.max(0, Number(rules.inviterBonus) || 0);
   const inviteeBonus = Math.max(0, Number(rules.inviteeBonus) || 0);
 
@@ -68,7 +102,7 @@ async function redeemInvite(tx, rawCode, newMember, rules) {
         memberId: invite.inviterId,
         type: 'bonus',
         earnedPoints: inviterBonus,
-        note: `お友達紹介ボーナス（${newMember.displayName}さんがコードを使用）`
+        note: inviterNote
       }
     });
   }
@@ -91,4 +125,4 @@ async function checkInvite(db, rawCode) {
   return 'ok';
 }
 
-module.exports = { normalizeCode, formatCode, issueInviteCode, redeemInvite, checkInvite };
+module.exports = { normalizeCode, normalizeRef, formatCode, issueInviteCode, redeemInvite, redeemReferral, checkInvite };
